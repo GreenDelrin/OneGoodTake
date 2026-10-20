@@ -40,7 +40,7 @@ fun MasteringScreen(
         Spacer(Modifier.height(8.dp))
         MasterSlider("MAKEUP GAIN", project.master.makeupGainDb, -12f..12f) { project.master.makeupGainDb = it; onMasterSettingsChanged() }
         MasterSlider("LIMITER CEILING", project.master.limiterThresholdDb, -6f..0f) { project.master.limiterThresholdDb = it; onMasterSettingsChanged() }
-        MasterSlider("SYNC OFFSET", project.syncOffsetMs.toFloat(), -200f..200f) { project.syncOffsetMs = it.toInt() }
+        MasterSlider("SYNC OFFSET", project.syncOffsetMs.toFloat(), -200f..200f) { project.syncOffsetMs = it.toInt(); onMasterSettingsChanged() }
         if (status.isNotBlank()) Text(status, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
         Spacer(Modifier.weight(1f))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

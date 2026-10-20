@@ -12,6 +12,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Button
@@ -37,6 +39,10 @@ import com.socialmaster.app.audio.Mixer
 import com.socialmaster.app.audio.Project
 import com.socialmaster.app.audio.Track
 import com.socialmaster.app.audio.WavIO
+import com.socialmaster.app.audio.WorkspaceStore
+import com.socialmaster.app.audio.fileFromUri
+import com.socialmaster.app.audio.restoreProject
+import com.socialmaster.app.audio.writeTo
 import com.socialmaster.app.camera.RecordingController
 import com.socialmaster.app.player.AudioPlayer
 import com.socialmaster.app.ui.screens.InputSetupDialog
@@ -68,49 +74,100 @@ class MainActivity : ComponentActivity() {
 private fun AppRoot(activity: MainActivity) {
     val scope = rememberCoroutineScope()
     val outputDir = remember { activity.filesDir }
-    val project = remember { Project("p1", "Untitled") }
-    val camera = remember { RecordingController(activity) }
+    val workspaceStore = remember { WorkspaceStore(activity) }
+    val restored = remember { workspaceStore.load() }
+    val project = remember { restoreProject(restored) }
+    val camera = remember {
+        RecordingController(activity).apply { useFrontCamera = restored["camera.front"]?.toBooleanStrictOrNull() ?: true }
+    }
     val capture = remember { AudioCapture(activity) }
     val backingPlayer = remember { AudioPlayer(activity) }
 
-    var screen by remember { mutableStateOf("record") }
+    var screen by remember {
+        mutableStateOf(when (restored["screen"]) {
+            "mix" -> if (project.tracks.isNotEmpty()) "mix" else "record"
+            "master" -> if (restoredFile(restored, "media.mixed") != null) "master" else if (project.tracks.isNotEmpty()) "mix" else "record"
+            else -> "record"
+        })
+    }
     var hasPermissions by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     var isRecording by remember { mutableStateOf(false) }
     var isFinalizing by remember { mutableStateOf(false) }
     var isStartingTake by remember { mutableStateOf(false) }
     var isMonitoring by remember { mutableStateOf(false) }
-    var monitorInput by remember { mutableStateOf(false) }
+    var monitorInput by remember { mutableStateOf(restored["capture.monitorInput"]?.toBooleanStrictOrNull() ?: false) }
     var isLoadingBacking by remember { mutableStateOf(false) }
     var loadProgress by remember { mutableFloatStateOf(0f) }
     var isMixing by remember { mutableStateOf(false) }
     var isMastering by remember { mutableStateOf(false) }
-    var keepScreenOn by remember { mutableStateOf(true) }
-    var useFront by remember { mutableStateOf(true) }
-    var mode by remember { mutableStateOf(InputChannelMode.INPUTS_1_2_STEREO) }
-    var sourceProfile by remember { mutableStateOf(InputSourceProfile.RAW) }
-    var selectedDeviceId by remember { mutableStateOf<Int?>(null) }
-    var userSelectedInput by remember { mutableStateOf(false) }
+    var keepScreenOn by remember { mutableStateOf(restored["capture.keepScreenOn"]?.toBooleanStrictOrNull() ?: true) }
+    var useFront by remember { mutableStateOf(restored["camera.front"]?.toBooleanStrictOrNull() ?: true) }
+    var mode by remember {
+        mutableStateOf(InputChannelMode.values().firstOrNull { it.name == restored["capture.mode"] } ?: InputChannelMode.INPUTS_1_2_STEREO)
+    }
+    var sourceProfile by remember {
+        mutableStateOf(InputSourceProfile.values().firstOrNull { it.name == restored["capture.profile"] }
+            ?: InputSourceProfile.USB_DIRECT)
+    }
+    var sourceProfileManuallySelected by remember { mutableStateOf(restored["capture.profileManual"]?.toBooleanStrictOrNull() ?: false) }
     var inputDevices by remember { mutableStateOf(capture.availableInputDevices()) }
+    val savedDeviceIdentity = restored["capture.deviceIdentity"].orEmpty()
+    val restoredDevice = inputDevices.firstOrNull { it.workspaceIdentity() == savedDeviceIdentity }
+    var selectedDeviceIdentity by remember { mutableStateOf(savedDeviceIdentity) }
+    var selectedDeviceId by remember { mutableStateOf(restoredDevice?.id) }
+    var userSelectedInput by remember {
+        mutableStateOf(restored["capture.userSelectedInput"]?.toBooleanStrictOrNull() == true && (restoredDevice != null || savedDeviceIdentity.isEmpty()))
+    }
     var levels by remember { mutableStateOf(InputLevels(0f, 0f)) }
     var routeInfo by remember { mutableStateOf("") }
     var inputDiagnostics by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("") }
     var livePeaks by remember { mutableStateOf<List<Float>>(emptyList()) }
     var backingPeaks by remember { mutableStateOf<List<Float>>(emptyList()) }
-    var backingTrack by remember { mutableStateOf<File?>(null) }
-    var backingDisplayName by remember { mutableStateOf("") }
+    var backingTrack by remember { mutableStateOf(restoredFile(restored, "backing.path")) }
+    var backingDisplayName by remember { mutableStateOf(restored["backing.name"].orEmpty()) }
     var backingPlaying by remember { mutableStateOf(false) }
-    var backingPositionMs by remember { mutableLongStateOf(0L) }
+    var backingPositionMs by remember { mutableLongStateOf(restored["backing.positionMs"]?.toLongOrNull()?.coerceAtLeast(0L) ?: 0L) }
     var backingDurationMs by remember { mutableLongStateOf(0L) }
     var takeBackingStartMs by remember { mutableLongStateOf(0L) }
-    var recordedVideo by remember { mutableStateOf<File?>(null) }
-    var recordedAudio by remember { mutableStateOf<File?>(null) }
-    var mixedFile by remember { mutableStateOf<File?>(null) }
-    var masteredFile by remember { mutableStateOf<File?>(null) }
-    var measuredLufs by remember { mutableFloatStateOf(-70f) }
+    val restoredVideo = restoredFile(restored, "media.video")
+    var recordedVideo by remember { mutableStateOf(restoredVideo) }
+    var completedVideo by remember { mutableStateOf(restoredVideo) }
+    var recordedAudio by remember {
+        mutableStateOf(project.tracks.firstOrNull { it.id == "interface" }?.sourceUri?.let(::fileFromUri)?.takeIf { it.isFile })
+    }
+    var mixedFile by remember { mutableStateOf(restoredFile(restored, "media.mixed")) }
+    var masteredFile by remember { mutableStateOf(restoredFile(restored, "media.mastered")) }
+    var measuredLufs by remember {
+        mutableFloatStateOf(restored["master.measuredLufs"]?.toFloatOrNull()?.takeIf { it.isFinite() } ?: -70f)
+    }
     var trackVersion by remember { mutableIntStateOf(0) }
     var videoFinalize by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
+
+    fun saveWorkspace() {
+        val snapshot = linkedMapOf<String, String>()
+        snapshot["screen"] = screen
+        snapshot["camera.front"] = useFront.toString()
+        snapshot["capture.mode"] = mode.name
+        snapshot["capture.profile"] = sourceProfile.name
+        snapshot["capture.profileManual"] = sourceProfileManuallySelected.toString()
+        snapshot["capture.deviceIdentity"] = selectedDeviceIdentity
+        snapshot["capture.userSelectedInput"] = userSelectedInput.toString()
+        snapshot["capture.monitorInput"] = monitorInput.toString()
+        snapshot["capture.keepScreenOn"] = keepScreenOn.toString()
+        snapshot["backing.path"] = backingTrack?.absolutePath.orEmpty()
+        snapshot["backing.name"] = backingDisplayName
+        snapshot["backing.positionMs"] = backingPositionMs.toString()
+        snapshot["media.video"] = completedVideo?.absolutePath.orEmpty()
+        snapshot["media.mixed"] = mixedFile?.absolutePath.orEmpty()
+        snapshot["media.mastered"] = masteredFile?.absolutePath.orEmpty()
+        snapshot["master.measuredLufs"] = measuredLufs.toString()
+        project.writeTo(snapshot)
+        workspaceStore.save(snapshot)
+    }
+
+    val saveWorkspaceOnStop by rememberUpdatedState(::saveWorkspace)
 
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
         hasPermissions = results.values.all { it }
@@ -122,13 +179,67 @@ private fun AppRoot(activity: MainActivity) {
             hasPermissions = true
         } else permissionLauncher.launch(required)
     }
-    LaunchedEffect(inputDevices, userSelectedInput) {
+    LaunchedEffect(inputDevices, userSelectedInput, selectedDeviceId, selectedDeviceIdentity, sourceProfileManuallySelected) {
         if (!userSelectedInput && selectedDeviceId == null) {
-            inputDevices.firstOrNull { it.isUsbAudioInput() }?.let {
-                selectedDeviceId = it.id
-                routeInfo = "${it.productName} detected; test input in setup"
+            val preferred = inputDevices.firstOrNull { it.workspaceIdentity() == selectedDeviceIdentity }
+            val device = preferred ?: inputDevices.firstOrNull { it.isUsbAudioInput() }
+            if (device != null) {
+                selectedDeviceId = device.id
+                selectedDeviceIdentity = device.workspaceIdentity()
+                userSelectedInput = true
+                routeInfo = "${device.productName} detected; test input in setup"
             }
         }
+        if (!sourceProfileManuallySelected) {
+            val selected = inputDevices.firstOrNull { it.id == selectedDeviceId }
+            if (selected != null) sourceProfile = if (selected.isUsbAudioInput()) InputSourceProfile.USB_DIRECT else InputSourceProfile.RAW
+            else if (inputDevices.isNotEmpty() && inputDevices.none { it.isUsbAudioInput() }) sourceProfile = InputSourceProfile.RAW
+        }
+    }
+    LaunchedEffect(hasPermissions, selectedDeviceId, sourceProfile) {
+        if (hasPermissions && sourceProfile == InputSourceProfile.USB_DIRECT && selectedDeviceId != null) {
+            val requestDeviceId = selectedDeviceId
+            capture.requestDirectUsbPermission(requestDeviceId) { error ->
+                if (selectedDeviceId == requestDeviceId && sourceProfile == InputSourceProfile.USB_DIRECT) {
+                    if (error == null) status = "Direct USB access granted."
+                    else {
+                        sourceProfile = InputSourceProfile.RAW
+                        sourceProfileManuallySelected = true
+                        status = error
+                    }
+                }
+            }
+        }
+    }
+    LaunchedEffect(Unit) {
+        val file = backingTrack ?: return@LaunchedEffect
+        val pcm = withContext(Dispatchers.IO) { WavIO.read(file) }
+        if (pcm == null || pcm.samples.isEmpty()) {
+            backingTrack = null
+            backingDisplayName = ""
+            backingPositionMs = 0L
+        } else {
+            backingPeaks = withContext(Dispatchers.Default) { com.socialmaster.app.ui.peaksFromSamples(pcm.samples, 500) }
+            backingDurationMs = (pcm.samples.size / pcm.channels * 1000L) / pcm.sampleRate
+            backingPositionMs = backingPositionMs.coerceAtMost(backingDurationMs)
+        }
+    }
+    LaunchedEffect(
+        screen, useFront, mode, sourceProfile, sourceProfileManuallySelected, selectedDeviceIdentity,
+        userSelectedInput, monitorInput, keepScreenOn, backingTrack, backingDisplayName,
+        backingPositionMs, backingPlaying, completedVideo, mixedFile, masteredFile,
+        measuredLufs, trackVersion, project.syncOffsetMs, project.master.makeupGainDb,
+        project.master.limiterThresholdDb, project.master.targetLufs, project.master.truePeakCeilingDb
+    ) {
+        kotlinx.coroutines.delay(350)
+        if (!backingPlaying) saveWorkspace()
+    }
+    DisposableEffect(activity) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) saveWorkspaceOnStop()
+        }
+        activity.lifecycle.addObserver(observer)
+        onDispose { activity.lifecycle.removeObserver(observer) }
     }
 
     DisposableEffect(capture) {
@@ -228,16 +339,19 @@ private fun AppRoot(activity: MainActivity) {
         if (started) status = "Input test running — play each input to check its meter."
     }
 
-    fun startCaptureAndCamera(video: File) {
+    suspend fun startCaptureAndCamera(video: File) {
         val audio = recordedAudio ?: return
-        val captureStarted = capture.startRecording(audio, selectedDeviceId, mode,
-            onLevels = { levels = it },
-            onRoute = { routeInfo = it },
-            onError = { status = it },
-            onDiagnostics = { inputDiagnostics = it },
-            monitorInput = monitorInput,
-            sourceProfile = sourceProfile
-        )
+        isStartingTake = true
+        val captureStarted = withContext(Dispatchers.IO) {
+            capture.startRecording(audio, selectedDeviceId, mode,
+                onLevels = { levels = it },
+                onRoute = { routeInfo = it },
+                onError = { message -> activity.runOnUiThread { status = message } },
+                onDiagnostics = { inputDiagnostics = it },
+                monitorInput = monitorInput,
+                sourceProfile = sourceProfile
+            )
+        }
         if (!captureStarted) {
             backingPlayer.stop(); backingPlaying = false; isStartingTake = false
             return
@@ -269,7 +383,9 @@ private fun AppRoot(activity: MainActivity) {
         takeBackingStartMs = backingPositionMs
         val backing = backingTrack
         if (backing == null) {
-            startCaptureAndCamera(video)
+            isStartingTake = true
+            status = "Starting synchronized capture…"
+            scope.launch { startCaptureAndCamera(video) }
             return
         }
         isStartingTake = true
@@ -314,6 +430,7 @@ private fun AppRoot(activity: MainActivity) {
             recordedAudio?.let {
                 project.tracks += Track("interface", mode.label, "file://${it.absolutePath}")
             }
+            completedVideo = recordedVideo
             trackVersion++
             mixedFile = null
             masteredFile = null
@@ -362,7 +479,7 @@ private fun AppRoot(activity: MainActivity) {
     }
 
     fun exportVideo() {
-        val video = recordedVideo ?: return
+        val video = completedVideo ?: return
         val input = mixedFile ?: return
         status = "Exporting MP4…"
         scope.launch {
@@ -428,7 +545,7 @@ private fun AppRoot(activity: MainActivity) {
                 )
                 "mix" -> MixingScreen(
                     tracks = remember(trackVersion) { project.tracks.toList() },
-                    videoFile = recordedVideo,
+                    videoFile = completedVideo,
                     mixedFile = mixedFile,
                     isMixing = isMixing,
                     status = status,
@@ -446,7 +563,7 @@ private fun AppRoot(activity: MainActivity) {
                 )
                 else -> MasteringScreen(
                     project = project,
-                    videoFile = recordedVideo,
+                    videoFile = completedVideo,
                     previewAudioFile = masteredFile ?: mixedFile,
                     measuredLufs = measuredLufs,
                     onMeasure = {
@@ -457,10 +574,10 @@ private fun AppRoot(activity: MainActivity) {
                         }
                     },
                     onAutoMaster = ::autoMaster,
-                    onMasterSettingsChanged = { masteredFile = null },
+                    onMasterSettingsChanged = { masteredFile = null; trackVersion++ },
                     onExport = ::exportVideo,
                     isMastering = isMastering,
-                    canExport = recordedVideo != null && (masteredFile != null || mixedFile != null),
+                    canExport = completedVideo != null && (masteredFile != null || mixedFile != null),
                     status = status,
                     onBack = { screen = "mix" }
                 )
@@ -483,7 +600,12 @@ private fun AppRoot(activity: MainActivity) {
             onDeviceSelected = { id ->
                 if (isMonitoring) { isMonitoring = false; scope.launch(Dispatchers.IO) { capture.stop() } }
                 selectedDeviceId = id
+                selectedDeviceIdentity = inputDevices.firstOrNull { it.id == id }?.workspaceIdentity().orEmpty()
                 userSelectedInput = true
+                if (id == null || inputDevices.none { it.id == id && it.isUsbAudioInput() }) {
+                    sourceProfile = InputSourceProfile.RAW
+                    sourceProfileManuallySelected = false
+                }
                 levels = InputLevels(0f, 0f)
                 routeInfo = ""
                 inputDiagnostics = ""
@@ -499,10 +621,12 @@ private fun AppRoot(activity: MainActivity) {
             sourceProfile = sourceProfile,
             onSourceProfileSelected = { selected ->
                 if (isMonitoring) { isMonitoring = false; scope.launch(Dispatchers.IO) { capture.stop() } }
-                sourceProfile = selected
                 levels = InputLevels(0f, 0f)
                 routeInfo = ""
                 inputDiagnostics = ""
+                sourceProfile = selected
+                sourceProfileManuallySelected = true
+                status = if (selected == InputSourceProfile.USB_DIRECT) "Requesting direct USB permission…" else ""
             },
             isTesting = isMonitoring,
             onToggleTest = ::startInputTest,
@@ -524,6 +648,12 @@ private fun AppRoot(activity: MainActivity) {
 
 private fun AudioDeviceInfo.isUsbAudioInput(): Boolean = type == AudioDeviceInfo.TYPE_USB_DEVICE ||
     type == AudioDeviceInfo.TYPE_USB_HEADSET || type == AudioDeviceInfo.TYPE_USB_ACCESSORY
+
+private fun AudioDeviceInfo.workspaceIdentity(): String =
+    "${type}|${productName?.toString()?.trim().orEmpty()}|${address.orEmpty()}"
+
+private fun restoredFile(values: Map<String, String>, key: String): File? =
+    values[key]?.takeIf { it.isNotBlank() }?.let(::File)?.takeIf { it.isFile }
 
 @Composable
 private fun StageButton(label: String, selected: Boolean, modifier: Modifier, enabled: Boolean, onClick: () -> Unit) {

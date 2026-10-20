@@ -64,12 +64,19 @@ fun InputSetupDialog(
                 }
                 Spacer(Modifier.height(10.dp))
                 Text("CAPTURE PROFILE", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
-                InputSourceProfile.values().forEach { option ->
+                InputSourceProfile.values().filter { option ->
+                    option != InputSourceProfile.USB_DIRECT || devices.any {
+                        it.id == selectedDeviceId && it.type in intArrayOf(
+                            AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_ACCESSORY
+                        )
+                    }
+                }.forEach { option ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         RadioButton(sourceProfile == option, onClick = { onSourceProfileSelected(option) })
                         Column {
                             Text(option.label)
                             if (option == InputSourceProfile.COMPATIBLE) Text("Fallback path for interfaces silent in Raw mode", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (option == InputSourceProfile.USB_DIRECT) Text("UAC2 direct capture; requests exclusive USB access", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }

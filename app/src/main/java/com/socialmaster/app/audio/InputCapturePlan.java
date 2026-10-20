@@ -28,10 +28,22 @@ public final class InputCapturePlan {
                     .orElse(0)
                 : 0;
         if (availableIndexMask != 0) {
-            return new InputCapturePlan(true, availableIndexMask, Integer.bitCount(availableIndexMask), requestedSelection);
+            int channels = Integer.bitCount(availableIndexMask);
+            int mapperSelection = channels == 1 ? PcmChannelMapper.LEFT : requestedSelection;
+            return new InputCapturePlan(true, availableIndexMask, channels, mapperSelection);
         }
         if (supportsStereo) return new InputCapturePlan(false, 0, 2, requestedSelection);
         if (requestedSelection == PcmChannelMapper.LEFT) return new InputCapturePlan(false, 0, 1, PcmChannelMapper.LEFT);
         throw new IllegalArgumentException("The input does not expose two channels");
+    }
+
+    public static InputCapturePlan create(int requestedSelection, boolean usbInput, int[] supportedIndexMasks,
+                                          boolean supportsStereo, boolean forcePositionalFallback) {
+        if (!forcePositionalFallback) return create(requestedSelection, usbInput, supportedIndexMasks, supportsStereo);
+        if (requestedSelection != PcmChannelMapper.LEFT && requestedSelection != PcmChannelMapper.RIGHT
+                && requestedSelection != PcmChannelMapper.STEREO)
+            throw new IllegalArgumentException("Unknown input channel selection");
+        if (!supportsStereo) throw new IllegalArgumentException("The input does not expose two channels");
+        return new InputCapturePlan(false, 0, 2, requestedSelection);
     }
 }
