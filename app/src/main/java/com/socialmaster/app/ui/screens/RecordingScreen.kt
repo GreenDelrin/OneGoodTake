@@ -4,6 +4,7 @@ import android.view.ViewGroup
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
@@ -13,6 +14,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
@@ -41,6 +44,7 @@ fun RecordingScreen(
     backingDurationMs: Long,
     backingPlaying: Boolean,
     onPreviewBacking: () -> Unit,
+    onRewindBacking: () -> Unit,
     onScrubBacking: (Float) -> Unit,
     onLoadBacking: () -> Unit,
     isLoadingBacking: Boolean,
@@ -65,6 +69,7 @@ fun RecordingScreen(
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Box(Modifier.weight(1f).fillMaxWidth().background(Color.Black)) {
             AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+            if (isRecording) SocialSafeAreaGuide(Modifier.fillMaxSize())
             Row(
                 Modifier.align(Alignment.TopCenter).fillMaxWidth().background(Color(0x990D1417)).padding(horizontal = 14.dp, vertical = 9.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -87,12 +92,42 @@ fun RecordingScreen(
                     Text("Replacing the previous track…", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                 }
             }
+            if (isRecording) {
+                Column(
+                    Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                        .background(Color(0xB20A1117)).padding(horizontal = 14.dp, vertical = 10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("BACKING", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                        Spacer(Modifier.width(8.dp))
+                        Text(backingName ?: "No backing track", modifier = Modifier.weight(1f), color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        IconAction("↺", "Restart backing track", onRewindBacking, enabled = backingDurationMs > 0L)
+                        IconAction(if (backingPlaying) "Ⅱ" else "▶", if (backingPlaying) "Pause backing" else "Play backing", onPreviewBacking, enabled = backingPeaks.isNotEmpty())
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("${time(backingPositionMs)} / ${time(backingDurationMs)}", color = Color.White, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(96.dp))
+                        if (backingPeaks.isNotEmpty()) Waveform(backingPeaks, MaterialTheme.colorScheme.primary, Modifier.weight(1f), backingProgress, onScrubBacking)
+                        else Spacer(Modifier.weight(1f))
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("TAKE", style = MaterialTheme.typography.labelSmall, color = Color.White, modifier = Modifier.width(42.dp))
+                        Waveform(livePeaks, MaterialTheme.colorScheme.secondary, Modifier.weight(1f), 1f)
+                        Spacer(Modifier.width(10.dp)); Meter(interfaceLevel)
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                        Button(onClick = onStopRecording, enabled = !isFinalizing, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB63E45))) {
+                            Text(if (isFinalizing) "SAVING TAKE…" else "STOP RECORDING")
+                        }
+                    }
+                }
+            }
         }
 
-        Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 10.dp, vertical = 8.dp)) {
+        if (!isRecording) Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 10.dp, vertical = 8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("BACKING", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.width(68.dp))
                 Text(backingName ?: "Choose a backing track", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                IconAction("↺", "Restart backing track", onRewindBacking, enabled = backingDurationMs > 0L)
                 IconAction(if (backingPlaying) "Ⅱ" else "▶", if (backingPlaying) "Pause backing" else "Play backing", onPreviewBacking, enabled = backingPeaks.isNotEmpty() && !isLoadingBacking)
                 IconAction("＋", "Load backing track", onLoadBacking, enabled = !isLoadingBacking && !isRecording && !isStartingTake)
             }
@@ -143,6 +178,35 @@ private fun IconAction(icon: String, description: String, onClick: () -> Unit, e
 @Composable
 private fun Meter(level: Float) {
     LinearProgressIndicator(progress = { level.coerceIn(0f, 1f) }, modifier = Modifier.width(68.dp).height(5.dp))
+}
+
+@Composable
+private fun SocialSafeAreaGuide(modifier: Modifier = Modifier) {
+    Box(modifier) {
+        Canvas(Modifier.fillMaxSize()) {
+            val left = size.width * 0.06f
+            val right = size.width * 0.84f
+            val top = size.height * 0.09f
+            val bottom = size.height * 0.78f
+            val shade = Color.Black.copy(alpha = 0.22f)
+            drawRect(shade, size = androidx.compose.ui.geometry.Size(size.width, top))
+            drawRect(shade, topLeft = androidx.compose.ui.geometry.Offset(0f, bottom), size = androidx.compose.ui.geometry.Size(size.width, size.height - bottom))
+            drawRect(shade, topLeft = androidx.compose.ui.geometry.Offset(0f, top), size = androidx.compose.ui.geometry.Size(left, bottom - top))
+            drawRect(shade, topLeft = androidx.compose.ui.geometry.Offset(right, top), size = androidx.compose.ui.geometry.Size(size.width - right, bottom - top))
+            drawRect(
+                Color.White.copy(alpha = 0.82f),
+                topLeft = androidx.compose.ui.geometry.Offset(left, top),
+                size = androidx.compose.ui.geometry.Size(right - left, bottom - top),
+                style = Stroke(width = 1.5.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(8.dp.toPx(), 6.dp.toPx())))
+            )
+        }
+        Text(
+            "KEEP IMPORTANT CONTENT INSIDE",
+            Modifier.align(Alignment.TopStart).padding(start = 8.dp, top = 8.dp),
+            color = Color.White.copy(alpha = 0.9f),
+            style = MaterialTheme.typography.labelSmall
+        )
+    }
 }
 
 private fun time(ms: Long) = "%d:%02d".format(ms / 60_000, ms / 1_000 % 60)

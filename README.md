@@ -16,13 +16,16 @@ JAVA_HOME="C:/Program Files/Eclipse Adoptium/jdk-17.0.18.8-hotspot" ./gradlew as
 - The app restores the selected settings, backing file, current take, and mix/master workspace after relaunch; it does not resume playback or recording.
 - Adapted from the supplied `UsbAudioProbe` project, whose README declares the code MIT-licensed; that folder contained no separate license or copyright notice. Confirm attribution before commercial distribution. This path has not yet been tested with physical hardware.
 
+## Editing
+- Recording uses a full-screen camera preview with social safe-area guides and a backing-track restart control.
+- Mix keeps the video visible, provides backing/take lanes, trim-in/trim-out, per-track effects, and a streaming audio preview that responds to edits while playing.
+- Final video trims snap to the next encoded keyframe; frame-accurate re-encoding is not implemented.
+
 ## Market notes
 - Closest competitors: Audigo (hardware-locked wireless mic + app, $7.99-15.99/mo), BandLab (free, social-first), n-Track (DAW).
 - Differentiator: works with ANY USB audio interface, one-button auto-master for social loudness, one-time price.
 - Suggested pricing: free tier (watermark/720p) + Pro $4.99/mo or $29.99 one-time. Launch discount to seed reviews.
 
 ## Next steps
-1. Wire CameraX preview + recording into RecordingScreen.
-2. Mux recorded audio with video; load wav/mp3 backing tracks.
-3. Real DSP: biquad EQ, FDN reverb, lookahead limiter, K-weighted LUFS.
-4. Export + share intents.
+1. Refine mastering-stage controls and overall visual consistency.
+2. Improve export quality and trim precision.

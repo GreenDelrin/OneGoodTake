@@ -3,56 +3,39 @@ package com.socialmaster.app.audio
 import java.io.File
 
 object Mixer {
-    /** Mix tracks to 48 kHz stereo; mono sources are centered. */
-    fun mix(tracks: List<Track>, out: File): Float {
-        val pcms = tracks.filterNot { it.muted }.mapNotNull { t ->
-            val f = File(t.sourceUri.removePrefix("file://"))
-            WavIO.read(f)?.let { pcm ->
-                val skip = (pcm.sampleRate.toLong() * t.sourceOffsetMs.coerceAtLeast(0L) / 1000L * pcm.channels)
-                    .coerceAtMost(pcm.samples.size.toLong()).toInt()
-                if (skip >= pcm.samples.size) null
-                else WavIO.Pcm(pcm.sampleRate, pcm.channels, pcm.samples.copyOfRange(skip, pcm.samples.size)) to t
+    /** Stream the selected timeline to a 48 kHz stereo WAV instead of holding every source in memory. */
+    @JvmOverloads
+    fun mix(tracks: List<Track>, out: File, trimStartMs: Long = 0L, trimEndMs: Long = 0L): Float {
+        val soloActive = tracks.any { it.solo && !it.muted }
+        val activeTracks = tracks.filter { !it.muted && (!soloActive || it.solo) }
+        val sources = mutableListOf<RealtimeMixSource>()
+        try {
+            for (track in activeTracks) {
+                val file = fileFromUri(track.sourceUri) ?: continue
+                try { sources += RealtimeWavSource(track.id, file, track.sourceOffsetMs) } catch (_: Exception) { }
             }
-        }
-        require(pcms.isNotEmpty()) { "No readable PCM audio tracks were found" }
-        val sr = 48000
-        val prepared = pcms.map { (pcm, track) ->
-            val stereo = when (pcm.channels) {
-                1 -> ShortArray(pcm.samples.size * 2).also { outSamples ->
-                    for (i in pcm.samples.indices) { outSamples[i * 2] = pcm.samples[i]; outSamples[i * 2 + 1] = pcm.samples[i] }
+            require(sources.isNotEmpty()) { "No readable PCM audio tracks were found" }
+
+            val startFrames = RealtimeMixCore.SAMPLE_RATE.toLong() * trimStartMs.coerceAtLeast(0L) / 1000L
+            val endFrames = if (trimEndMs > 0L) RealtimeMixCore.SAMPLE_RATE.toLong() * trimEndMs / 1000L else null
+            val maxFrames = endFrames?.let { (it - startFrames).coerceAtLeast(0L) }
+            val engine = RealtimeMixCore(sources, activeTracks, maxFrames, startFrames)
+            require(engine.durationMs > 0L) { "The selected trim range contains no audio" }
+
+            val meter = StreamingLufsMeter(RealtimeMixCore.SAMPLE_RATE, 2)
+            WavIO.StreamingWriter(out, RealtimeMixCore.SAMPLE_RATE, 2).use { writer ->
+                val block = ShortArray(512 * 2)
+                while (true) {
+                    val frames = engine.render(block, 512)
+                    if (frames == 0) break
+                    val samples = frames * 2
+                    writer.write(block, 0, samples)
+                    meter.add(block, 0, samples)
                 }
-                2 -> pcm.samples
-                else -> throw IllegalArgumentException("Only mono/stereo tracks are supported")
             }
-            PcmResampler.resample(stereo, 2, pcm.sampleRate, sr) to track
+            return meter.lufs()
+        } finally {
+            sources.forEach { try { it.close() } catch (_: Exception) { } }
         }
-        val maxFrames = prepared.maxOf { it.first.size / 2 }
-        val left = FloatArray(maxFrames)
-        val right = FloatArray(maxFrames)
-        for ((converted, t) in prepared) {
-            val l = ShortArray(converted.size / 2) { converted[it * 2] }
-            val r = ShortArray(converted.size / 2) { converted[it * 2 + 1] }
-            val eqL = Dsp.eq(l, sr, t.eqLowDb, t.eqMidDb, t.eqHighDb)
-            val eqR = Dsp.eq(r, sr, t.eqLowDb, t.eqMidDb, t.eqHighDb)
-            val linked = ShortArray(converted.size)
-            for (i in eqL.indices) { linked[i * 2] = eqL[i]; linked[i * 2 + 1] = eqR[i] }
-            val compressed = PcmCompressor.compressStereo(linked, sr, t.compressorAmount)
-            val compressedL = ShortArray(compressed.size / 2) { compressed[it * 2] }
-            val compressedR = ShortArray(compressed.size / 2) { compressed[it * 2 + 1] }
-            val wetL = Dsp.reverb(compressedL, sr, t.reverbSend)
-            val wetR = Dsp.reverb(compressedR, sr, t.reverbSend)
-            val gain = Math.pow(10.0, (t.volumeDb / 20.0)).toFloat()
-            for (i in wetL.indices) { left[i] += wetL[i] * gain; right[i] += wetR[i] * gain }
-        }
-        var peak = 0f
-        for (i in 0 until maxFrames) peak = maxOf(peak, kotlin.math.abs(left[i]), kotlin.math.abs(right[i]))
-        val scale = if (peak > 32767f) 32767f / peak else 1f
-        val outSamples = ShortArray(maxFrames * 2)
-        for (i in 0 until maxFrames) {
-            outSamples[i * 2] = (left[i] * scale).toInt().coerceIn(-32768, 32767).toShort()
-            outSamples[i * 2 + 1] = (right[i] * scale).toInt().coerceIn(-32768, 32767).toShort()
-        }
-        WavIO.write(out, WavIO.Pcm(sr, 2, outSamples))
-        return Dsp.lufs(outSamples, sr, 2)
     }
 }

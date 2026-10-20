@@ -7,7 +7,7 @@ object WorkspaceStoreSelfTest {
     fun main(args: Array<String>) {
         val source = File.createTempFile("socialmaster-source", ".wav")
         try {
-            val project = Project("session-2", "Coffee set", syncOffsetMs = 120)
+            val project = Project("session-2", "Coffee set", syncOffsetMs = 120, trimStartMs = 750L, trimEndMs = 8_250L)
             project.master.makeupGainDb = 3.5f
             project.master.targetLufs = -12f
             project.tracks += Track(
@@ -20,6 +20,7 @@ object WorkspaceStoreSelfTest {
             val restored = restoreProject(WorkspaceCodec.decode(WorkspaceCodec.encode(encoded)))
             check(restored.id == "session-2" && restored.title == "Coffee set")
             check(restored.syncOffsetMs == 120 && restored.master.makeupGainDb == 3.5f)
+            check(restored.trimStartMs == 750L && restored.trimEndMs == 8_250L)
             check(restored.master.targetLufs == -12f && restored.tracks.single().name == "Song = one")
             check(restored.tracks.single().sourceUri == source.toURI().toString())
             check(restored.tracks.single().muted && restored.tracks.single().compressorAmount == 0.5f)

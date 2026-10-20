@@ -13,5 +13,7 @@ data class Project(
     val tracks: MutableList<Track> = mutableListOf(),
     val master: MasterBus = MasterBus(),
     var videoUri: String? = null,
-    var syncOffsetMs: Int = 0   // audio vs video alignment
+    var syncOffsetMs: Int = 0,   // audio vs video alignment
+    var trimStartMs: Long = 0L,
+    var trimEndMs: Long = 0L
 )

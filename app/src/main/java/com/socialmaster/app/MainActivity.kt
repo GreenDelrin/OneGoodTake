@@ -1,12 +1,16 @@
 package com.socialmaster.app
 
 import android.Manifest
-import android.content.Intent
+import android.content.ContentValues
+import android.content.Context
 import android.content.pm.PackageManager
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Bundle
+import android.os.Environment
+import android.provider.MediaStore
 import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -26,10 +30,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.socialmaster.app.audio.AudioCapture
 import com.socialmaster.app.audio.AudioDecoder
-import com.socialmaster.app.audio.Dsp
+import com.socialmaster.app.audio.BackingLibraryEntry
 import com.socialmaster.app.audio.Exporter
 import com.socialmaster.app.audio.InputChannelMode
 import com.socialmaster.app.audio.InputLevels
@@ -37,16 +42,20 @@ import com.socialmaster.app.audio.InputSourceProfile
 import com.socialmaster.app.audio.Mastering
 import com.socialmaster.app.audio.Mixer
 import com.socialmaster.app.audio.Project
+import com.socialmaster.app.audio.RealtimeMixPlayer
 import com.socialmaster.app.audio.Track
 import com.socialmaster.app.audio.WavIO
 import com.socialmaster.app.audio.WorkspaceStore
 import com.socialmaster.app.audio.fileFromUri
 import com.socialmaster.app.audio.restoreProject
+import com.socialmaster.app.audio.restoreBackingLibrary
+import com.socialmaster.app.audio.writeBackingLibrary
 import com.socialmaster.app.audio.writeTo
 import com.socialmaster.app.camera.RecordingController
 import com.socialmaster.app.player.AudioPlayer
+import com.socialmaster.app.ui.VideoPreviewController
 import com.socialmaster.app.ui.screens.InputSetupDialog
-import com.socialmaster.app.ui.screens.MasteringScreen
+import com.socialmaster.app.ui.screens.BackingLibraryDialog
 import com.socialmaster.app.ui.screens.MixingScreen
 import com.socialmaster.app.ui.screens.RecordingScreen
 import com.socialmaster.app.ui.theme.SocialMasterTheme
@@ -82,13 +91,11 @@ private fun AppRoot(activity: MainActivity) {
     }
     val capture = remember { AudioCapture(activity) }
     val backingPlayer = remember { AudioPlayer(activity) }
+    val mixPreview = remember { RealtimeMixPlayer(activity) }
+    val mixVideoController = remember { VideoPreviewController() }
 
     var screen by remember {
-        mutableStateOf(when (restored["screen"]) {
-            "mix" -> if (project.tracks.isNotEmpty()) "mix" else "record"
-            "master" -> if (restoredFile(restored, "media.mixed") != null) "master" else if (project.tracks.isNotEmpty()) "mix" else "record"
-            else -> "record"
-        })
+        mutableStateOf(if ((restored["screen"] == "mix" || restored["screen"] == "master") && project.tracks.isNotEmpty()) "mix" else "record")
     }
     var hasPermissions by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
@@ -99,8 +106,11 @@ private fun AppRoot(activity: MainActivity) {
     var monitorInput by remember { mutableStateOf(restored["capture.monitorInput"]?.toBooleanStrictOrNull() ?: false) }
     var isLoadingBacking by remember { mutableStateOf(false) }
     var loadProgress by remember { mutableFloatStateOf(0f) }
-    var isMixing by remember { mutableStateOf(false) }
-    var isMastering by remember { mutableStateOf(false) }
+    var isExporting by remember { mutableStateOf(false) }
+    var isMixPreviewPlaying by remember { mutableStateOf(false) }
+    var isMixPreviewPreparing by remember { mutableStateOf(false) }
+    var mixPreviewPositionMs by remember { mutableLongStateOf(0L) }
+    var mixPreviewDurationMs by remember { mutableLongStateOf(0L) }
     var keepScreenOn by remember { mutableStateOf(restored["capture.keepScreenOn"]?.toBooleanStrictOrNull() ?: true) }
     var useFront by remember { mutableStateOf(restored["camera.front"]?.toBooleanStrictOrNull() ?: true) }
     var mode by remember {
@@ -125,8 +135,20 @@ private fun AppRoot(activity: MainActivity) {
     var status by remember { mutableStateOf("") }
     var livePeaks by remember { mutableStateOf<List<Float>>(emptyList()) }
     var backingPeaks by remember { mutableStateOf<List<Float>>(emptyList()) }
-    var backingTrack by remember { mutableStateOf(restoredFile(restored, "backing.path")) }
-    var backingDisplayName by remember { mutableStateOf(restored["backing.name"].orEmpty()) }
+    var trackWaveforms by remember { mutableStateOf<Map<String, List<Float>>>(emptyMap()) }
+    val restoredBacking = restoredFile(restored, "backing.path")
+    val restoredBackingName = restored["backing.name"].orEmpty()
+    var backingTrack by remember { mutableStateOf(restoredBacking) }
+    var backingDisplayName by remember { mutableStateOf(restoredBackingName) }
+    var backingLibrary by remember {
+        mutableStateOf(
+            restoreBackingLibrary(restored).let { entries ->
+                if (restoredBacking == null || entries.any { it.path == restoredBacking.absolutePath }) entries
+                else listOf(BackingLibraryEntry(restoredBacking.absolutePath, restoredBackingName, false, 0L)) + entries
+            }
+        )
+    }
+    var backingLibraryOpen by remember { mutableStateOf(false) }
     var backingPlaying by remember { mutableStateOf(false) }
     var backingPositionMs by remember { mutableLongStateOf(restored["backing.positionMs"]?.toLongOrNull()?.coerceAtLeast(0L) ?: 0L) }
     var backingDurationMs by remember { mutableLongStateOf(0L) }
@@ -134,11 +156,10 @@ private fun AppRoot(activity: MainActivity) {
     val restoredVideo = restoredFile(restored, "media.video")
     var recordedVideo by remember { mutableStateOf(restoredVideo) }
     var completedVideo by remember { mutableStateOf(restoredVideo) }
+    var videoDurationMs by remember { mutableLongStateOf(restored["media.videoDurationMs"]?.toLongOrNull()?.coerceAtLeast(0L) ?: 0L) }
     var recordedAudio by remember {
         mutableStateOf(project.tracks.firstOrNull { it.id == "interface" }?.sourceUri?.let(::fileFromUri)?.takeIf { it.isFile })
     }
-    var mixedFile by remember { mutableStateOf(restoredFile(restored, "media.mixed")) }
-    var masteredFile by remember { mutableStateOf(restoredFile(restored, "media.mastered")) }
     var measuredLufs by remember {
         mutableFloatStateOf(restored["master.measuredLufs"]?.toFloatOrNull()?.takeIf { it.isFinite() } ?: -70f)
     }
@@ -160,10 +181,10 @@ private fun AppRoot(activity: MainActivity) {
         snapshot["backing.name"] = backingDisplayName
         snapshot["backing.positionMs"] = backingPositionMs.toString()
         snapshot["media.video"] = completedVideo?.absolutePath.orEmpty()
-        snapshot["media.mixed"] = mixedFile?.absolutePath.orEmpty()
-        snapshot["media.mastered"] = masteredFile?.absolutePath.orEmpty()
+        snapshot["media.videoDurationMs"] = videoDurationMs.toString()
         snapshot["master.measuredLufs"] = measuredLufs.toString()
         project.writeTo(snapshot)
+        writeBackingLibrary(backingLibrary, snapshot)
         workspaceStore.save(snapshot)
     }
 
@@ -196,6 +217,14 @@ private fun AppRoot(activity: MainActivity) {
             else if (inputDevices.isNotEmpty() && inputDevices.none { it.isUsbAudioInput() }) sourceProfile = InputSourceProfile.RAW
         }
     }
+    LaunchedEffect(completedVideo) {
+        val file = completedVideo ?: return@LaunchedEffect
+        val duration = withContext(Dispatchers.IO) { readVideoDurationMs(file) } ?: return@LaunchedEffect
+        if (duration <= 0L) return@LaunchedEffect
+        videoDurationMs = duration
+        if (project.trimEndMs == 0L || project.trimEndMs > duration) project.trimEndMs = duration
+        if (project.trimStartMs >= project.trimEndMs) project.trimStartMs = 0L
+    }
     LaunchedEffect(hasPermissions, selectedDeviceId, sourceProfile) {
         if (hasPermissions && sourceProfile == InputSourceProfile.USB_DIRECT && selectedDeviceId != null) {
             val requestDeviceId = selectedDeviceId
@@ -213,23 +242,26 @@ private fun AppRoot(activity: MainActivity) {
     }
     LaunchedEffect(Unit) {
         val file = backingTrack ?: return@LaunchedEffect
-        val pcm = withContext(Dispatchers.IO) { WavIO.read(file) }
-        if (pcm == null || pcm.samples.isEmpty()) {
+        val duration = withContext(Dispatchers.IO) { WavIO.durationMs(file) }
+        val peaks = withContext(Dispatchers.IO) { WavIO.peaks(file, 500) }
+        if (duration == null || peaks == null || duration <= 0L) {
             backingTrack = null
             backingDisplayName = ""
             backingPositionMs = 0L
         } else {
-            backingPeaks = withContext(Dispatchers.Default) { com.socialmaster.app.ui.peaksFromSamples(pcm.samples, 500) }
-            backingDurationMs = (pcm.samples.size / pcm.channels * 1000L) / pcm.sampleRate
+            backingPeaks = peaks
+            backingDurationMs = duration
             backingPositionMs = backingPositionMs.coerceAtMost(backingDurationMs)
         }
     }
     LaunchedEffect(
         screen, useFront, mode, sourceProfile, sourceProfileManuallySelected, selectedDeviceIdentity,
         userSelectedInput, monitorInput, keepScreenOn, backingTrack, backingDisplayName,
-        backingPositionMs, backingPlaying, completedVideo, mixedFile, masteredFile,
+        backingLibrary,
+        backingPositionMs, backingPlaying, completedVideo, videoDurationMs, isExporting,
         measuredLufs, trackVersion, project.syncOffsetMs, project.master.makeupGainDb,
-        project.master.limiterThresholdDb, project.master.targetLufs, project.master.truePeakCeilingDb
+        project.trimStartMs, project.trimEndMs, project.master.limiterThresholdDb,
+        project.master.targetLufs, project.master.truePeakCeilingDb
     ) {
         kotlinx.coroutines.delay(350)
         if (!backingPlaying) saveWorkspace()
@@ -267,10 +299,47 @@ private fun AppRoot(activity: MainActivity) {
         }
     }
 
+    DisposableEffect(mixPreview) {
+        onDispose { mixPreview.release() }
+    }
+
+    LaunchedEffect(screen) {
+        if (screen != "mix" && (isMixPreviewPlaying || isMixPreviewPreparing)) {
+            mixPreview.stop()
+            mixVideoController.pause()
+            isMixPreviewPlaying = false
+            isMixPreviewPreparing = false
+        }
+    }
+
+    LaunchedEffect(isMixPreviewPlaying) {
+        while (isMixPreviewPlaying) {
+            mixPreviewPositionMs = mixPreview.positionMs
+            mixPreviewDurationMs = mixPreview.durationMs
+            val videoDuration = mixVideoController.durationMs()
+            val videoEnd = project.trimEndMs.takeIf { it > 0L } ?: videoDuration
+            if (videoEnd > 0L && mixVideoController.positionMs() >= videoEnd && mixPreview.isPlaying) {
+                mixPreview.stop(); mixVideoController.pause()
+                isMixPreviewPlaying = false
+                return@LaunchedEffect
+            }
+            kotlinx.coroutines.delay(80)
+        }
+    }
+
     DisposableEffect(keepScreenOn) {
         if (keepScreenOn) activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         else activity.window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         onDispose { activity.window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+    }
+
+    DisposableEffect(isRecording) {
+        val insets = WindowInsetsControllerCompat(activity.window, activity.window.decorView)
+        if (isRecording) {
+            insets.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            insets.hide(WindowInsetsCompat.Type.systemBars())
+        } else insets.show(WindowInsetsCompat.Type.systemBars())
+        onDispose { insets.show(WindowInsetsCompat.Type.systemBars()) }
     }
 
     LaunchedEffect(isRecording, isMonitoring) {
@@ -285,21 +354,56 @@ private fun AppRoot(activity: MainActivity) {
             kotlinx.coroutines.delay(100)
         }
     }
+    val trackSourcesKey = project.tracks.joinToString("\u0000") { "${it.id}:${it.sourceUri}" }
+    LaunchedEffect(trackSourcesKey) {
+        val tracks = project.tracks.toList()
+        trackWaveforms = withContext(Dispatchers.IO) {
+            tracks.mapNotNull { track ->
+                val file = fileFromUri(track.sourceUri) ?: return@mapNotNull null
+                val peaks = WavIO.peaks(file, 240) ?: return@mapNotNull null
+                track.id to peaks
+            }.toMap()
+        }
+    }
+
+    suspend fun loadBackingFile(file: File, name: String): Boolean {
+        isLoadingBacking = true
+        backingPlayer.stop(); backingPlaying = false
+        val (duration, peaks) = withContext(Dispatchers.IO) {
+            WavIO.durationMs(file) to WavIO.peaks(file, 500)
+        }
+        isLoadingBacking = false
+        if (duration == null || duration <= 0L || peaks == null) {
+            status = "The selected file contains no readable PCM audio."
+            return false
+        }
+        backingTrack = file
+        backingDisplayName = name
+        backingPeaks = peaks
+        backingDurationMs = duration
+        backingPositionMs = 0L
+        status = "Backing track ready"
+        return true
+    }
+
+    fun rememberBacking(file: File, name: String) {
+        val path = file.absolutePath
+        val favorite = backingLibrary.firstOrNull { it.path == path }?.favorite ?: false
+        val updated = listOf(BackingLibraryEntry(path, name, favorite, System.currentTimeMillis())) + backingLibrary.filterNot { it.path == path }
+        val favorites = updated.filter { it.favorite }
+        val recents = updated.filterNot { it.favorite }.take((20 - favorites.size).coerceAtLeast(0))
+        backingLibrary = (favorites + recents).sortedByDescending { it.lastUsedMs }
+    }
 
     val backingPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let { selected ->
-            backingPlayer.stop()
-            backingPlaying = false
-            backingTrack = null
-            backingPeaks = emptyList()
-            backingPositionMs = 0L
-            backingDurationMs = 0L
             isLoadingBacking = true
             loadProgress = 0f
             status = "Preparing backing track…"
-            backingDisplayName = activity.contentResolver.query(selected, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            val displayName = activity.contentResolver.query(selected, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
                 if (cursor.moveToFirst()) cursor.getString(0) else null
             } ?: "Backing track"
+            backingDisplayName = displayName
             scope.launch {
                 val output = File(outputDir, "backing_${System.currentTimeMillis()}.wav")
                 val decoded = withContext(Dispatchers.IO) {
@@ -308,15 +412,13 @@ private fun AppRoot(activity: MainActivity) {
                     }
                 }
                 if (decoded) {
-                    val pcm = withContext(Dispatchers.IO) { WavIO.read(output) }
-                    if (pcm != null && pcm.samples.isNotEmpty()) {
-                        backingTrack = output
-                        backingPeaks = withContext(Dispatchers.Default) { com.socialmaster.app.ui.peaksFromSamples(pcm.samples, 500) }
-                        backingDurationMs = (pcm.samples.size / pcm.channels * 1000L) / pcm.sampleRate
-                        status = "Backing track ready"
-                    } else status = "The selected file contains no readable PCM audio."
-                } else status = "Could not decode that audio file. Try a PCM WAV or MP3."
-                isLoadingBacking = false
+                    if (loadBackingFile(output, displayName)) rememberBacking(output, displayName)
+                    else output.delete()
+                } else {
+                    output.delete()
+                    isLoadingBacking = false
+                    status = "Could not decode that audio file. Try a PCM WAV or MP3."
+                }
             }
         }
     }
@@ -431,76 +533,86 @@ private fun AppRoot(activity: MainActivity) {
                 project.tracks += Track("interface", mode.label, "file://${it.absolutePath}")
             }
             completedVideo = recordedVideo
+            videoDurationMs = completedVideo?.let { file -> withContext(Dispatchers.IO) { readVideoDurationMs(file) } } ?: 0L
+            project.trimStartMs = 0L
+            project.trimEndMs = videoDurationMs
             trackVersion++
-            mixedFile = null
-            masteredFile = null
             status = "Take saved — mixing is ready."
             isFinalizing = false
             screen = "mix"
         }
     }
 
-    fun applyMix() {
-        if (project.tracks.isEmpty() || isMixing) return
-        isMixing = true
-        status = "Applying track levels and effects…"
-        scope.launch {
-            try {
-                val output = File(outputDir, "mix_${System.currentTimeMillis()}.wav")
-                measuredLufs = withContext(Dispatchers.IO) { Mixer.mix(project.tracks.toList(), output) }
-                mixedFile = output
-                masteredFile = null
-                status = if (measuredLufs <= -60f) "Mix is digital silence. Check the input test and each source WAV." else "Mix ready — use the preview controls above to listen with video."
-            } catch (e: Exception) {
-                status = "Mix failed: ${e.message ?: "unsupported or unreadable track"}"
-            } finally { isMixing = false }
-        }
-    }
-
-    fun autoMaster() {
-        val input = mixedFile ?: return
-        if (isMastering) return
-        if (measuredLufs <= -60f) {
-            status = "Auto-master stopped: the current mix is silent. Fix the source tracks first."
+    fun toggleMixPreview() {
+        if (isMixPreviewPlaying || isMixPreviewPreparing) {
+            mixPreview.stop()
+            mixVideoController.pause()
+            isMixPreviewPlaying = false
+            isMixPreviewPreparing = false
             return
         }
-        isMastering = true
-        status = "Measuring and mastering…"
-        scope.launch {
-            try {
-                val output = File(outputDir, "master_${System.currentTimeMillis()}.wav")
-                measuredLufs = withContext(Dispatchers.IO) { Mastering.auto(project, input, output) }
-                masteredFile = output
-                status = "Master created. Listen in the preview, then export."
-            } catch (e: Exception) {
-                status = "Mastering failed: ${e.message ?: "audio processing error"}"
-            } finally { isMastering = false }
-        }
+        isMixPreviewPreparing = true
+        mixPreviewPositionMs = 0L
+        val previewEnd = project.trimEndMs.takeIf { it > 0L } ?: videoDurationMs
+        mixPreview.play(project.tracks.toList(), project.trimStartMs, previewEnd,
+            onStarted = {
+                mixVideoController.playAt(project.trimStartMs)
+                isMixPreviewPreparing = false
+                isMixPreviewPlaying = true
+                mixPreviewDurationMs = mixPreview.durationMs
+            },
+            onFinished = { error ->
+                mixVideoController.pause()
+                isMixPreviewPreparing = false
+                isMixPreviewPlaying = false
+                mixPreviewPositionMs = mixPreview.positionMs
+                if (error != null) status = "Mix preview failed: $error"
+            }
+        )
     }
 
-    fun exportVideo() {
+    fun exportFinalVideo() {
         val video = completedVideo ?: return
-        val input = mixedFile ?: return
-        status = "Exporting MP4…"
+        if (project.tracks.isEmpty() || isExporting) return
+        if (isMixPreviewPlaying || isMixPreviewPreparing) {
+            mixPreview.stop(); mixVideoController.pause()
+            isMixPreviewPlaying = false; isMixPreviewPreparing = false
+        }
+        isExporting = true
+        val tracks = project.tracks.map { it.copy() }
+        val trimStart = project.trimStartMs
+        val trimEnd = project.trimEndMs.takeIf { it > 0L } ?: videoDurationMs
+        val syncOffset = project.syncOffsetMs
+        val targetLufs = project.master.targetLufs
+        val masteringProject = project.copy(tracks = tracks.toMutableList(), master = project.master.copy())
+        val jobId = System.currentTimeMillis()
+        val mixOutput = File(outputDir, "export_mix_$jobId.wav")
+        val masterOutput = File(outputDir, "export_master_$jobId.wav")
+        val videoOutput = File(outputDir, "SocialMaster_$jobId.mp4")
+        status = "Rendering mix…"
         scope.launch {
-            val output = File(outputDir, "SocialMaster_${System.currentTimeMillis()}.mp4")
-            val audio = masteredFile ?: File(outputDir, "master_export_${System.currentTimeMillis()}.wav").also { masterOutput ->
-                withContext(Dispatchers.IO) {
-                    Mastering.process(input, masterOutput, project.master.makeupGainDb, project.master.limiterThresholdDb)
+            try {
+                val mixLufs = withContext(Dispatchers.IO) { Mixer.mix(tracks, mixOutput, trimStart, trimEnd) }
+                if (mixLufs <= -70f) throw IllegalStateException("The mix is silent. Check the track levels and files.")
+                status = "Mastering to ${targetLufs.toInt()} LUFS…"
+                val finalLufs = withContext(Dispatchers.IO) { Mastering.auto(masteringProject, mixOutput, masterOutput) }
+                status = "Exporting video…"
+                val muxed = withContext(Dispatchers.IO) {
+                    Exporter.export(video, masterOutput, videoOutput, syncOffset, trimStart, trimEnd)
                 }
-                masteredFile = masterOutput
+                if (!muxed) throw IllegalStateException("Could not combine the video and mastered audio")
+                status = "Saving to Gallery…"
+                withContext(Dispatchers.IO) { saveVideoToGallery(activity, videoOutput) }
+                project.master.makeupGainDb = masteringProject.master.makeupGainDb
+                measuredLufs = finalLufs
+                trackVersion++
+                status = "Export saved to Movies/SocialMaster"
+            } catch (e: Exception) {
+                status = "Export failed: ${e.message ?: "audio/video processing error"}"
+            } finally {
+                isExporting = false
+                mixOutput.delete(); masterOutput.delete(); videoOutput.delete()
             }
-            val success = withContext(Dispatchers.IO) { Exporter.export(video, audio, output, project.syncOffsetMs) }
-            if (success) {
-                val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.fileprovider", output)
-                val send = Intent(Intent.ACTION_SEND).apply {
-                    type = "video/mp4"
-                    putExtra(Intent.EXTRA_STREAM, uri)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                activity.startActivity(Intent.createChooser(send, "Share your video"))
-                status = "Export complete"
-            } else status = "Export failed. Check the recorded video/audio and try again."
         }
     }
 
@@ -529,11 +641,12 @@ private fun AppRoot(activity: MainActivity) {
                             else { backingPlayer.play(file, loop = false, startPositionMs = backingPositionMs); backingPlaying = true }
                         }
                     },
+                    onRewindBacking = { backingPositionMs = 0L; backingPlayer.seekTo(0L) },
                     onScrubBacking = { fraction ->
                         backingPositionMs = (backingDurationMs * fraction).toLong()
                         backingPlayer.seekTo(backingPositionMs)
                     },
-                    onLoadBacking = { backingPicker.launch(arrayOf("audio/*")) },
+                    onLoadBacking = { backingLibraryOpen = true },
                     isLoadingBacking = isLoadingBacking,
                     backingLoadProgress = loadProgress,
                     livePeaks = livePeaks,
@@ -543,53 +656,53 @@ private fun AppRoot(activity: MainActivity) {
                     outputDir = outputDir,
                     onOpenSetup = { settingsOpen = true }
                 )
-                "mix" -> MixingScreen(
+                else -> MixingScreen(
                     tracks = remember(trackVersion) { project.tracks.toList() },
+                    trackWaveforms = trackWaveforms,
                     videoFile = completedVideo,
-                    mixedFile = mixedFile,
-                    isMixing = isMixing,
+                    videoController = mixVideoController,
+                    isExporting = isExporting,
+                    canExport = completedVideo != null && project.tracks.isNotEmpty(),
+                    targetLufs = project.master.targetLufs,
+                    isPreviewPlaying = isMixPreviewPlaying,
+                    isPreviewPreparing = isMixPreviewPreparing,
+                    previewPositionMs = mixPreviewPositionMs,
+                    previewDurationMs = mixPreviewDurationMs,
+                    trimStartMs = project.trimStartMs,
+                    trimEndMs = project.trimEndMs,
                     status = status,
+                    onTargetLufsChanged = { target -> project.master.targetLufs = target; trackVersion++ },
+                    onTrimChanged = { start, end ->
+                        if (project.trimStartMs != start || project.trimEndMs != end) {
+                            if (isMixPreviewPlaying || isMixPreviewPreparing) {
+                                mixPreview.stop(); mixVideoController.pause(); isMixPreviewPlaying = false; isMixPreviewPreparing = false
+                            }
+                            project.trimStartMs = start
+                            project.trimEndMs = end
+                            trackVersion++
+                        }
+                    },
                     onTrackChange = { updated ->
                         val index = project.tracks.indexOfFirst { it.id == updated.id }
                         if (index >= 0) {
                             project.tracks[index] = updated
+                            mixPreview.updateTracks(project.tracks.toList())
                             trackVersion++
-                            mixedFile = null
-                            masteredFile = null
                         }
                     },
-                    onApplyMix = ::applyMix,
-                    onGoMaster = { screen = "master" }
-                )
-                else -> MasteringScreen(
-                    project = project,
-                    videoFile = completedVideo,
-                    previewAudioFile = masteredFile ?: mixedFile,
-                    measuredLufs = measuredLufs,
-                    onMeasure = {
-                        val file = masteredFile ?: mixedFile
-                        if (file != null) scope.launch {
-                            val pcm = withContext(Dispatchers.IO) { WavIO.read(file) }
-                            if (pcm != null) measuredLufs = Dsp.lufs(pcm.samples, pcm.sampleRate, pcm.channels)
-                        }
-                    },
-                    onAutoMaster = ::autoMaster,
-                    onMasterSettingsChanged = { masteredFile = null; trackVersion++ },
-                    onExport = ::exportVideo,
-                    isMastering = isMastering,
-                    canExport = completedVideo != null && (masteredFile != null || mixedFile != null),
-                    status = status,
-                    onBack = { screen = "mix" }
+                    onTogglePreview = ::toggleMixPreview,
+                    onExport = ::exportFinalVideo
                 )
             }
         }
-        Row(
-            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 8.dp, vertical = 5.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            StageButton("01  Record", screen == "record", Modifier.weight(1f), enabled = !isRecording && !isStartingTake && !isFinalizing) { screen = "record" }
-            StageButton("02  Mix", screen == "mix", Modifier.weight(1f), enabled = project.tracks.isNotEmpty() && !isRecording && !isStartingTake && !isFinalizing) { screen = "mix" }
-            StageButton("03  Master", screen == "master", Modifier.weight(1f), enabled = mixedFile != null && !isRecording && !isStartingTake && !isFinalizing) { screen = "master" }
+        if (!isRecording && !isStartingTake) {
+            Row(
+                Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 8.dp, vertical = 5.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                StageButton("01  Record", screen == "record", Modifier.weight(1f), enabled = !isFinalizing && !isExporting) { screen = "record" }
+                StageButton("02  Edit + export", screen == "mix", Modifier.weight(1f), enabled = project.tracks.isNotEmpty() && !isFinalizing && !isExporting) { screen = "mix" }
+            }
         }
     }
 
@@ -644,6 +757,30 @@ private fun AppRoot(activity: MainActivity) {
             }
         )
     }
+
+    if (backingLibraryOpen) {
+        BackingLibraryDialog(
+            entries = backingLibrary,
+            onAddFromPhone = {
+                backingLibraryOpen = false
+                backingPicker.launch(arrayOf("audio/*"))
+            },
+            onSelect = { entry ->
+                backingLibraryOpen = false
+                scope.launch {
+                    val file = File(entry.path)
+                    if (loadBackingFile(file, entry.name)) rememberBacking(file, entry.name)
+                    else backingLibrary = backingLibrary.filterNot { it.path == entry.path }
+                }
+            },
+            onFavoriteChanged = { entry, favorite ->
+                backingLibrary = backingLibrary.map {
+                    if (it.path == entry.path) it.copy(favorite = favorite) else it
+                }
+            },
+            onDismiss = { backingLibraryOpen = false }
+        )
+    }
 }
 
 private fun AudioDeviceInfo.isUsbAudioInput(): Boolean = type == AudioDeviceInfo.TYPE_USB_DEVICE ||
@@ -654,6 +791,35 @@ private fun AudioDeviceInfo.workspaceIdentity(): String =
 
 private fun restoredFile(values: Map<String, String>, key: String): File? =
     values[key]?.takeIf { it.isNotBlank() }?.let(::File)?.takeIf { it.isFile }
+
+private fun saveVideoToGallery(context: Context, file: File) {
+    val values = ContentValues().apply {
+        put(MediaStore.MediaColumns.DISPLAY_NAME, file.name)
+        put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
+        put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_MOVIES}/SocialMaster")
+        put(MediaStore.MediaColumns.IS_PENDING, 1)
+    }
+    val resolver = context.contentResolver
+    val uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+        ?: throw IllegalStateException("Android could not add the video to Gallery")
+    try {
+        val destination = resolver.openOutputStream(uri, "w") ?: throw IllegalStateException("Android could not open the Gallery file")
+        destination.use { output -> file.inputStream().use { input -> input.copyTo(output, 64 * 1024) } }
+        resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+    } catch (e: Exception) {
+        resolver.delete(uri, null, null)
+        throw e
+    }
+}
+
+private fun readVideoDurationMs(file: File): Long? {
+    val retriever = MediaMetadataRetriever()
+    return try {
+        retriever.setDataSource(file.absolutePath)
+        retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+    } catch (_: Exception) { null }
+    finally { try { retriever.release() } catch (_: Exception) { } }
+}
 
 @Composable
 private fun StageButton(label: String, selected: Boolean, modifier: Modifier, enabled: Boolean, onClick: () -> Unit) {
