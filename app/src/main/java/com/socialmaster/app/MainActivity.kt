@@ -41,7 +41,6 @@ import com.socialmaster.app.audio.InputLevels
 import com.socialmaster.app.audio.InputSourceProfile
 import com.socialmaster.app.audio.Mastering
 import com.socialmaster.app.audio.Mixer
-import com.socialmaster.app.audio.OutputTest
 import com.socialmaster.app.audio.Project
 import com.socialmaster.app.audio.RealtimeMixPlayer
 import com.socialmaster.app.audio.Track
@@ -87,8 +86,14 @@ private fun AppRoot(activity: MainActivity) {
     val workspaceStore = remember { WorkspaceStore(activity) }
     val restored = remember { workspaceStore.load() }
     val project = remember { restoreProject(restored) }
+    var cameraLabel by remember { mutableStateOf("CAMERA") }
     val camera = remember {
-        RecordingController(activity).apply { useFrontCamera = restored["camera.front"]?.toBooleanStrictOrNull() ?: true }
+        RecordingController(activity).apply {
+            onCameraChanged = { label -> cameraLabel = label }
+            val savedIndex = restored["camera.index"]?.toIntOrNull()
+            if (savedIndex != null) selectCamera(savedIndex)
+            else usePreferredFacing(restored["camera.front"]?.toBooleanStrictOrNull() ?: true)
+        }
     }
     val capture = remember { AudioCapture(activity) }
     LaunchedEffect(Unit) { capture.warmUp() }
@@ -116,8 +121,6 @@ private fun AppRoot(activity: MainActivity) {
     var mixPreviewPositionMs by remember { mutableLongStateOf(0L) }
     var mixPreviewDurationMs by remember { mutableLongStateOf(0L) }
     var keepScreenOn by remember { mutableStateOf(restored["capture.keepScreenOn"]?.toBooleanStrictOrNull() ?: true) }
-    var useFront by remember { mutableStateOf(restored["camera.front"]?.toBooleanStrictOrNull() ?: true) }
-    var cameraWasFront by remember { mutableStateOf(restored["camera.front"]?.toBooleanStrictOrNull() ?: true) }
     var mode by remember {
         mutableStateOf(InputChannelMode.values().firstOrNull { it.name == restored["capture.mode"] } ?: InputChannelMode.INPUTS_1_2_STEREO)
     }
@@ -175,7 +178,8 @@ private fun AppRoot(activity: MainActivity) {
     fun saveWorkspace() {
         val snapshot = linkedMapOf<String, String>()
         snapshot["screen"] = screen
-        snapshot["camera.front"] = useFront.toString()
+        snapshot["camera.front"] = (camera.cameras.getOrNull(camera.cameraIndex)?.isFront ?: true).toString()
+        snapshot["camera.index"] = camera.cameraIndex.toString()
         snapshot["capture.mode"] = mode.name
         snapshot["capture.profile"] = sourceProfile.name
         snapshot["capture.profileManual"] = sourceProfileManuallySelected.toString()
@@ -261,9 +265,9 @@ private fun AppRoot(activity: MainActivity) {
         }
     }
     LaunchedEffect(
-        screen, useFront, mode, sourceProfile, sourceProfileManuallySelected, selectedDeviceIdentity,
+        screen, mode, sourceProfile, sourceProfileManuallySelected, selectedDeviceIdentity,
         userSelectedInput, monitorInput, keepScreenOn, backingTrack, backingDisplayName,
-        backingLibrary,
+        backingLibrary, cameraLabel,
         backingPositionMs, backingPlaying, completedVideo, videoDurationMs, isExporting,
         measuredLufs, trackVersion, project.syncOffsetMs, project.master.makeupGainDb,
         project.trimStartMs, project.trimEndMs, project.master.limiterThresholdDb,
@@ -427,14 +431,6 @@ private fun AppRoot(activity: MainActivity) {
                     status = "Could not decode that audio file. Try a PCM WAV or MP3."
                 }
             }
-        }
-    }
-
-    fun testOutput() {
-        status = "Playing a 1 kHz test tone…"
-        OutputTest.play(activity) { result ->
-            status = result
-            outputRoute = result
         }
     }
 
@@ -616,7 +612,7 @@ private fun AppRoot(activity: MainActivity) {
                 val finalLufs = withContext(Dispatchers.IO) { Mastering.auto(masteringProject, mixOutput, masterOutput) }
                 status = "Exporting video…"
                 val muxed = withContext(Dispatchers.IO) {
-                    Exporter.export(video, masterOutput, videoOutput, syncOffset, trimStart, trimEnd, if (cameraWasFront) 270 else 90)
+                    Exporter.export(video, masterOutput, videoOutput, syncOffset, trimStart, trimEnd, camera.rotationHint)
                 }
                 if (!muxed) throw IllegalStateException("Could not combine the video and mastered audio")
                 status = "Saving to Gallery…"
@@ -642,8 +638,8 @@ private fun AppRoot(activity: MainActivity) {
                     isRecording = isRecording,
                     isFinalizing = isFinalizing,
                     isStartingTake = isStartingTake,
-                    useFrontCamera = useFront,
-                    onToggleCamera = { useFront = !useFront; cameraWasFront = useFront; camera.toggleCamera() },
+                    cameraLabel = cameraLabel,
+                    onCycleCamera = { camera.nextCamera() },
                     onStartRecording = ::beginTake,
                     onStopRecording = ::finishTake,
                     backingName = backingDisplayName,
@@ -673,7 +669,6 @@ private fun AppRoot(activity: MainActivity) {
                     backingLoadProgress = loadProgress,
                     livePeaks = livePeaks,
                     interfaceLevel = maxOf(levels.left, levels.right),
-                    routeInfo = routeInfo,
                     outputRoute = outputRoute,
                     status = status,
                     outputDir = outputDir,
@@ -770,8 +765,6 @@ private fun AppRoot(activity: MainActivity) {
             onMonitorInputChanged = { monitorInput = it },
             levels = levels,
             routedDevice = routeInfo,
-            outputRoute = outputRoute,
-            onTestOutput = ::testOutput,
             diagnostics = inputDiagnostics,
             statusMessage = status,
             keepScreenOn = keepScreenOn,

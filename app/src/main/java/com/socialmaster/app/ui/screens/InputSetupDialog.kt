@@ -28,8 +28,6 @@ fun InputSetupDialog(
     onMonitorInputChanged: (Boolean) -> Unit,
     levels: InputLevels,
     routedDevice: String,
-    outputRoute: String,
-    onTestOutput: () -> Unit,
     diagnostics: String,
     statusMessage: String,
     keepScreenOn: Boolean,
@@ -98,19 +96,6 @@ fun InputSetupDialog(
                     Switch(monitorInput, onMonitorInputChanged)
                 }
                 Text(if (routedDevice.isBlank()) "No route detected" else "Android route: $routedDevice", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(6.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Test output", style = MaterialTheme.typography.bodySmall)
-                        Text(
-                            if (outputRoute.isBlank()) "Plays a 1 kHz tone so you can check the headphones"
-                            else outputRoute,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    OutlinedButton(onClick = onTestOutput) { Text("Play tone") }
-                }
                 if (diagnostics.isNotBlank()) Text(diagnostics, style = MaterialTheme.typography.labelSmall, color = if (diagnostics.contains("digital silence")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                 if (statusMessage.isNotBlank()) Text(statusMessage, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
                 Spacer(Modifier.height(8.dp))

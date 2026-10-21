@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -35,8 +36,8 @@ fun RecordingScreen(
     isRecording: Boolean,
     isFinalizing: Boolean,
     isStartingTake: Boolean,
-    useFrontCamera: Boolean,
-    onToggleCamera: () -> Unit,
+    cameraLabel: String,
+    onCycleCamera: () -> Unit,
     onStartRecording: (File) -> Unit,
     onStopRecording: () -> Unit,
     backingName: String?,
@@ -53,7 +54,6 @@ fun RecordingScreen(
     backingLoadProgress: Float,
     livePeaks: List<Float>,
     interfaceLevel: Float,
-    routeInfo: String,
     outputRoute: String,
     status: String,
     outputDir: File,
@@ -61,10 +61,14 @@ fun RecordingScreen(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val orientation = LocalConfiguration.current.orientation
+    // The camera records 16:9 in sensor space, so the upright frame is 9:16 in portrait.
+    val frameAspect = if (orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) 16f / 9f else 9f / 16f
     val previewView = remember {
         PreviewView(context).apply {
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-            scaleType = PreviewView.ScaleType.FILL_CENTER
+            // Letterbox instead of cropping so the preview shows the frame that will be recorded.
+            scaleType = PreviewView.ScaleType.FIT_CENTER
         }
     }
     LaunchedEffect(Unit) { controller.bind(lifecycleOwner, previewView) }
@@ -72,18 +76,24 @@ fun RecordingScreen(
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Box(Modifier.weight(1f).fillMaxWidth().background(Color.Black)) {
             AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
-            if (isRecording) SocialSafeAreaGuide(Modifier.fillMaxSize())
+            if (isRecording) {
+                SocialSafeAreaGuide(
+                    Modifier.fillMaxSize(),
+                    frameAspect,
+                    showSafeArea = orientation != android.content.res.Configuration.ORIENTATION_LANDSCAPE
+                )
+            }
             Row(
                 Modifier.align(Alignment.TopCenter).fillMaxWidth().background(Color(0x990D1417)).padding(horizontal = 14.dp, vertical = 9.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("SOCIALMASTER v1.3", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                    Text("SOCIALMASTER v1.4", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                     Text(if (isRecording) "RECORDING" else if (isFinalizing) "SAVING TAKE" else "READY TO RECORD", style = MaterialTheme.typography.labelSmall, color = if (isRecording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Text(if (useFrontCamera) "FRONT" else "REAR", style = MaterialTheme.typography.labelSmall, color = Color.White)
+                Text(cameraLabel, style = MaterialTheme.typography.labelSmall, color = Color.White)
                 IconButton(
-    onClick = onToggleCamera,
+    onClick = onCycleCamera,
     enabled = !isRecording && !isFinalizing && !isStartingTake,
     modifier = Modifier
         .size(48.dp)
@@ -207,18 +217,34 @@ private fun Meter(level: Float) {
 }
 
 @Composable
-private fun SocialSafeAreaGuide(modifier: Modifier = Modifier) {
+private fun SocialSafeAreaGuide(modifier: Modifier = Modifier, frameAspect: Float, showSafeArea: Boolean) {
     Box(modifier) {
         Canvas(Modifier.fillMaxSize()) {
-            val left = size.width * 0.06f
-            val right = size.width * 0.84f
-            val top = size.height * 0.09f
-            val bottom = size.height * 0.78f
+            // The guide has to follow the recorded frame, not the screen: the preview is letterboxed,
+            // so on a wide tablet the frame is much narrower than the view.
+            val frameWidth: Float
+            val frameHeight: Float
+            if (size.width / size.height > frameAspect) {
+                frameHeight = size.height
+                frameWidth = size.height * frameAspect
+            } else {
+                frameWidth = size.width
+                frameHeight = size.width / frameAspect
+            }
+            val frameLeft = (size.width - frameWidth) / 2f
+            val frameTop = (size.height - frameHeight) / 2f
+            if (!showSafeArea) return@Canvas
+            // TikTok and Instagram Reels cover the right hand column with their buttons and the
+            // bottom with the caption and music, so that strip of the frame is not safe to stand in.
+            val left = frameLeft + frameWidth * 0.08f
+            val right = frameLeft + frameWidth * 0.70f
+            val top = frameTop + frameHeight * 0.12f
+            val bottom = frameTop + frameHeight * 0.72f
             val shade = Color.Black.copy(alpha = 0.22f)
-            drawRect(shade, size = androidx.compose.ui.geometry.Size(size.width, top))
-            drawRect(shade, topLeft = androidx.compose.ui.geometry.Offset(0f, bottom), size = androidx.compose.ui.geometry.Size(size.width, size.height - bottom))
-            drawRect(shade, topLeft = androidx.compose.ui.geometry.Offset(0f, top), size = androidx.compose.ui.geometry.Size(left, bottom - top))
-            drawRect(shade, topLeft = androidx.compose.ui.geometry.Offset(right, top), size = androidx.compose.ui.geometry.Size(size.width - right, bottom - top))
+            drawRect(shade, topLeft = androidx.compose.ui.geometry.Offset(frameLeft, frameTop), size = androidx.compose.ui.geometry.Size(frameWidth, top - frameTop))
+            drawRect(shade, topLeft = androidx.compose.ui.geometry.Offset(frameLeft, bottom), size = androidx.compose.ui.geometry.Size(frameWidth, frameTop + frameHeight - bottom))
+            drawRect(shade, topLeft = androidx.compose.ui.geometry.Offset(frameLeft, top), size = androidx.compose.ui.geometry.Size(left - frameLeft, bottom - top))
+            drawRect(shade, topLeft = androidx.compose.ui.geometry.Offset(right, top), size = androidx.compose.ui.geometry.Size(frameLeft + frameWidth - right, bottom - top))
             drawRect(
                 Color.White.copy(alpha = 0.82f),
                 topLeft = androidx.compose.ui.geometry.Offset(left, top),
@@ -226,12 +252,14 @@ private fun SocialSafeAreaGuide(modifier: Modifier = Modifier) {
                 style = Stroke(width = 1.5.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(8.dp.toPx(), 6.dp.toPx())))
             )
         }
-        Text(
-            "KEEP IMPORTANT CONTENT INSIDE",
-            Modifier.align(Alignment.TopStart).padding(start = 8.dp, top = 8.dp),
-            color = Color.White.copy(alpha = 0.9f),
-            style = MaterialTheme.typography.labelSmall
-        )
+        if (showSafeArea) {
+            Text(
+                "SAFE AREA - KEEP CONTENT HERE",
+                Modifier.align(Alignment.TopStart).padding(start = 8.dp, top = 58.dp),
+                color = Color.White.copy(alpha = 0.9f),
+                style = MaterialTheme.typography.labelSmall
+            )
+        }
     }
 }
 
