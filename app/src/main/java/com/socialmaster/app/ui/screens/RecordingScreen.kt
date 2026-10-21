@@ -100,7 +100,7 @@ fun RecordingScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("SOCIALMASTER v1.4", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+                    Text("SOCIALMASTER v1.5", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
                     Text(
                         if (isRecording) "RECORDING" else if (isFinalizing) "SAVING TAKE" else "READY TO RECORD",
                         style = MaterialTheme.typography.labelSmall,
