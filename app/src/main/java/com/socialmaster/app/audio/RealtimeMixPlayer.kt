@@ -24,6 +24,7 @@ class RealtimeMixPlayer(context: Context) {
     @Volatile private var running = false
     @Volatile private var generation = 0L
     @Volatile private var startSignal: CountDownLatch? = null
+    @Volatile private var warmedUp = false
     @Volatile var isPlaying = false
         private set
     @Volatile var isPreparing = false
@@ -32,6 +33,40 @@ class RealtimeMixPlayer(context: Context) {
         private set
     @Volatile var durationMs = 0L
         private set
+
+fun warmUp() {
+        if (warmedUp) return
+        warmedUp = true
+        try {
+            val sampleRate = RealtimeMixCore.SAMPLE_RATE
+            val channelMask = AudioFormat.CHANNEL_OUT_STEREO
+            val bufferSize = AudioTrack.getMinBufferSize(sampleRate, channelMask, AudioFormat.ENCODING_PCM_16BIT)
+            if (bufferSize <= 0) return
+            val track = AudioTrack.Builder()
+                .setAudioAttributes(AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build())
+                .setAudioFormat(AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(sampleRate)
+                    .setChannelMask(channelMask)
+                    .build())
+                .setBufferSizeInBytes(bufferSize)
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .build()
+            if (track.state == AudioTrack.STATE_INITIALIZED) {
+                track.play()
+                val silence = ShortArray(sampleRate / 10) // 100ms of silence
+                track.write(silence, 0, silence.size)
+                Thread.sleep(50)
+                track.stop()
+                track.release()
+            }
+        } catch (_: Exception) {
+            // Ignore warmup failures
+        }
+    }
 
     @Synchronized
     fun play(
@@ -82,6 +117,7 @@ class RealtimeMixPlayer(context: Context) {
                     .setTransferMode(AudioTrack.MODE_STREAM)
                     .build()
                 check(audio.state == AudioTrack.STATE_INITIALIZED) { "Android could not initialize audio output" }
+                OutputRouter.apply(audio, appContext)
                 val readyAudio = checkNotNull(audio)
                 output = readyAudio
                 val signal = CountDownLatch(1)

@@ -90,8 +90,11 @@ private fun AppRoot(activity: MainActivity) {
         RecordingController(activity).apply { useFrontCamera = restored["camera.front"]?.toBooleanStrictOrNull() ?: true }
     }
     val capture = remember { AudioCapture(activity) }
+    LaunchedEffect(Unit) { capture.warmUp() }
     val backingPlayer = remember { AudioPlayer(activity) }
+    LaunchedEffect(Unit) { backingPlayer.warmUp() }
     val mixPreview = remember { RealtimeMixPlayer(activity) }
+    LaunchedEffect(Unit) { mixPreview.warmUp() }
     val mixVideoController = remember { VideoPreviewController() }
 
     var screen by remember {

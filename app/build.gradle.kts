@@ -12,8 +12,8 @@ android {
         applicationId = "com.socialmaster.app"
         minSdk = 29
         targetSdk = 34
-versionCode = 3
-        versionName = "1.1"
+versionCode = 4
+        versionName = "1.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
