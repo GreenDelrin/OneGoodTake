@@ -20,12 +20,16 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -54,10 +58,12 @@ import com.socialmaster.app.audio.writeTo
 import com.socialmaster.app.camera.RecordingController
 import com.socialmaster.app.player.AudioPlayer
 import com.socialmaster.app.ui.VideoPreviewController
+import com.socialmaster.app.ui.components.AppIconButton
 import com.socialmaster.app.ui.screens.InputSetupDialog
 import com.socialmaster.app.ui.screens.BackingLibraryDialog
 import com.socialmaster.app.ui.screens.MixingScreen
 import com.socialmaster.app.ui.screens.RecordingScreen
+import com.socialmaster.app.ui.theme.AppButtonShape
 import com.socialmaster.app.ui.theme.SocialMasterTheme
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -67,12 +73,16 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 
 class MainActivity : ComponentActivity() {
+    private var darkTheme by mutableStateOf(true)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val restored = WorkspaceStore(this).load()
+        darkTheme = restored["ui.dark"]?.toBooleanStrictOrNull() ?: true
         setContent {
-            SocialMasterTheme {
+            SocialMasterTheme(darkTheme) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    AppRoot(this)
+                    AppRoot(this, restored, darkTheme) { darkTheme = !darkTheme }
                 }
             }
         }
@@ -80,11 +90,10 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun AppRoot(activity: MainActivity) {
+private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkTheme: Boolean, onToggleTheme: () -> Unit) {
     val scope = rememberCoroutineScope()
     val outputDir = remember { activity.filesDir }
     val workspaceStore = remember { WorkspaceStore(activity) }
-    val restored = remember { workspaceStore.load() }
     val project = remember { restoreProject(restored) }
     var cameraLabel by remember { mutableStateOf("CAMERA") }
     val camera = remember {
@@ -180,6 +189,7 @@ private fun AppRoot(activity: MainActivity) {
         snapshot["screen"] = screen
         snapshot["camera.front"] = (camera.cameras.getOrNull(camera.cameraIndex)?.isFront ?: true).toString()
         snapshot["camera.index"] = camera.cameraIndex.toString()
+        snapshot["ui.dark"] = darkTheme.toString()
         snapshot["capture.mode"] = mode.name
         snapshot["capture.profile"] = sourceProfile.name
         snapshot["capture.profileManual"] = sourceProfileManuallySelected.toString()
@@ -267,14 +277,14 @@ private fun AppRoot(activity: MainActivity) {
     LaunchedEffect(
         screen, mode, sourceProfile, sourceProfileManuallySelected, selectedDeviceIdentity,
         userSelectedInput, monitorInput, keepScreenOn, backingTrack, backingDisplayName,
-        backingLibrary, cameraLabel,
+        backingLibrary, cameraLabel, darkTheme,
         backingPositionMs, backingPlaying, completedVideo, videoDurationMs, isExporting,
         measuredLufs, trackVersion, project.syncOffsetMs, project.master.makeupGainDb,
         project.trimStartMs, project.trimEndMs, project.master.limiterThresholdDb,
         project.master.targetLufs, project.master.truePeakCeilingDb
     ) {
         kotlinx.coroutines.delay(350)
-        if (!backingPlaying) saveWorkspace()
+        saveWorkspace()
     }
     DisposableEffect(activity) {
         val observer = LifecycleEventObserver { _, event ->
@@ -434,6 +444,10 @@ private fun AppRoot(activity: MainActivity) {
         }
     }
 
+    /** Starting at the very end would play nothing, so a finished track restarts. */
+    fun backingStartMs(): Long =
+        if (backingDurationMs > 0L && backingPositionMs >= backingDurationMs - 500L) 0L else backingPositionMs
+
     fun startInputTest() {
         if (isMonitoring) {
             isMonitoring = false; levels = InputLevels(0f, 0f); routeInfo = ""; status = ""
@@ -495,7 +509,6 @@ private fun AppRoot(activity: MainActivity) {
         if (isMonitoring) { status = "Stop the input test in setup before recording."; return }
         recordedAudio = File(outputDir, "take_audio_${System.currentTimeMillis()}.wav")
         recordedVideo = video
-        takeBackingStartMs = backingPositionMs
         val backing = backingTrack
         if (backing == null) {
             isStartingTake = true
@@ -505,7 +518,10 @@ private fun AppRoot(activity: MainActivity) {
         }
         isStartingTake = true
         status = "Starting backing playback for synchronized capture…"
-        backingPlayer.play(backing, loop = false, startPositionMs = takeBackingStartMs)
+        val start = backingStartMs()
+        takeBackingStartMs = start
+        backingPositionMs = start
+        backingPlayer.play(backing, loop = false, startPositionMs = start)
         backingPlaying = true
         scope.launch {
             val started = withTimeoutOrNull(3_000) {
@@ -653,7 +669,9 @@ private fun AppRoot(activity: MainActivity) {
                         if (file != null) {
                             if (backingPlaying) { backingPositionMs = backingPlayer.currentPositionMs(); backingPlayer.pause(); backingPlaying = false }
                             else {
-                                backingPlayer.play(file, loop = false, startPositionMs = backingPositionMs)
+                                val start = backingStartMs()
+                                backingPositionMs = start
+                                backingPlayer.play(file, loop = false, startPositionMs = start)
                                 backingPlaying = true
                                 outputRoute = backingPlayer.routeDescription()
                             }
@@ -716,10 +734,16 @@ private fun AppRoot(activity: MainActivity) {
         if (!isRecording && !isStartingTake) {
             Row(
                 Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 8.dp, vertical = 5.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 StageButton("01  Record", screen == "record", Modifier.weight(1f), enabled = !isFinalizing && !isExporting) { screen = "record" }
                 StageButton("02  Edit + export", screen == "mix", Modifier.weight(1f), enabled = project.tracks.isNotEmpty() && !isFinalizing && !isExporting) { screen = "mix" }
+                AppIconButton(
+                    if (darkTheme) Icons.Filled.LightMode else Icons.Filled.DarkMode,
+                    if (darkTheme) "Switch to light theme" else "Switch to dark theme",
+                    onToggleTheme
+                )
             }
         }
     }
@@ -846,10 +870,11 @@ private fun StageButton(label: String, selected: Boolean, modifier: Modifier, en
         onClick = onClick,
         enabled = enabled,
         modifier = modifier,
+        shape = AppButtonShape,
         colors = ButtonDefaults.buttonColors(
             containerColor = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
             contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
         ),
-        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 7.dp)
-    ) { Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1) }
+        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 9.dp)
+    ) { Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1) }
 }

@@ -62,13 +62,12 @@ class AudioPlayer(private val context: Context) {
     fun play(file: java.io.File, loop: Boolean = false, startPositionMs: Long = 0L) {
         val p = ensure()
         // Keep the backing track on the same device the monitor uses, otherwise it leaves through
-        // the phone while the interface stays silent.
+        // the phone while the interface stays silent. Re-applying it on a prepared player makes
+        // Media3 re-resolve the tracks, so only do it when the device actually changed.
         val target = OutputRouter.pick(context)
-        if (target != null) {
+        if (target != null && target.id != outputDevice?.id) {
             p.setPreferredAudioDevice(target)
             outputDevice = target
-        } else {
-            outputDevice = null
         }
         p.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)))
         p.repeatMode = if (loop) ExoPlayer.REPEAT_MODE_ALL else ExoPlayer.REPEAT_MODE_OFF

@@ -8,10 +8,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
+import androidx.compose.material3.MaterialTheme
+import com.socialmaster.app.ui.theme.AppChipShape
 import kotlin.math.abs
 
 /** Draws a mirrored peak waveform from a list of 0..1 peaks. */
@@ -21,13 +24,15 @@ fun Waveform(
     color: Color,
     modifier: Modifier = Modifier,
     progress: Float = 1f,
+    background: Color = MaterialTheme.colorScheme.surfaceVariant,
     onSeek: ((Float) -> Unit)? = null
 ) {
     Canvas(
         modifier
             .fillMaxWidth()
             .height(56.dp)
-            .background(Color(0xFF1E1E1E))
+            .clip(AppChipShape)
+            .background(background)
             .then(if (onSeek == null) Modifier else Modifier
                 .pointerInput(onSeek) {
                     detectTapGestures { onSeek((it.x / size.width).coerceIn(0f, 1f)) }

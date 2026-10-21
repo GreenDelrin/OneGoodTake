@@ -7,27 +7,37 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Cameraswitch
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Replay
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.FlipCameraIos
 import androidx.compose.ui.viewinterop.AndroidView
 import com.socialmaster.app.camera.RecordingController
 import com.socialmaster.app.ui.Waveform
+import com.socialmaster.app.ui.components.AppButton
+import com.socialmaster.app.ui.components.AppIconButton
+import com.socialmaster.app.ui.theme.AppButtonShape
+import com.socialmaster.app.ui.theme.AppCardShape
+import com.socialmaster.app.ui.theme.RecordRed
 import java.io.File
 
 @Composable
@@ -84,130 +94,168 @@ fun RecordingScreen(
                 )
             }
             Row(
-                Modifier.align(Alignment.TopCenter).fillMaxWidth().background(Color(0x990D1417)).padding(horizontal = 14.dp, vertical = 9.dp),
+                Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)
+                    .clip(AppCardShape).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
+                    .padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("SOCIALMASTER v1.4", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                    Text(if (isRecording) "RECORDING" else if (isFinalizing) "SAVING TAKE" else "READY TO RECORD", style = MaterialTheme.typography.labelSmall, color = if (isRecording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("SOCIALMASTER v1.4", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+                    Text(
+                        if (isRecording) "RECORDING" else if (isFinalizing) "SAVING TAKE" else "READY TO RECORD",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isRecording) RecordRed else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
-                Text(cameraLabel, style = MaterialTheme.typography.labelSmall, color = Color.White)
-                IconButton(
-    onClick = onCycleCamera,
-    enabled = !isRecording && !isFinalizing && !isStartingTake,
-    modifier = Modifier
-        .size(48.dp)
-        .background(Color.Black.copy(alpha = 0.4f), CircleShape)
-) {
-    Icon(
-        imageVector = Icons.Filled.FlipCameraIos,
-        contentDescription = "Switch camera",
-        tint = if (!isRecording && !isFinalizing && !isStartingTake) Color.White else Color.White.copy(alpha = 0.4f),
-        modifier = Modifier.size(24.dp)
-    )
-}
-                IconAction("⚙", "Recording setup", onOpenSetup, enabled = !isRecording && !isFinalizing && !isStartingTake)
+                Text(cameraLabel, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(end = 4.dp))
+                AppIconButton(
+                    Icons.Filled.Cameraswitch, "Switch camera", onCycleCamera,
+                    enabled = !isRecording && !isFinalizing && !isStartingTake
+                )
+                AppIconButton(
+                    Icons.Filled.Settings, "Recording setup", onOpenSetup,
+                    enabled = !isRecording && !isFinalizing && !isStartingTake
+                )
             }
             if (isLoadingBacking) {
-                Column(Modifier.align(Alignment.Center).fillMaxWidth(0.76f).background(Color(0xE61A2428), MaterialTheme.shapes.large).padding(18.dp)) {
-                    Text("Preparing backing track", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                Column(
+                    Modifier.align(Alignment.Center).fillMaxWidth(0.76f)
+                        .clip(AppCardShape).background(MaterialTheme.colorScheme.surface)
+                        .padding(18.dp)
+                ) {
+                    Text("Preparing backing track", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
                     Spacer(Modifier.height(10.dp))
                     if (backingLoadProgress > 0f) LinearProgressIndicator(progress = { backingLoadProgress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
                     else LinearProgressIndicator(Modifier.fillMaxWidth())
                     Spacer(Modifier.height(8.dp))
-                    Text("Replacing the previous track…", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    Text("Replacing the previous track…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             if (isRecording) {
                 Column(
-                    Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                        .background(Color(0xB20A1117)).padding(horizontal = 14.dp, vertical = 10.dp)
+                    Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 10.dp, vertical = 10.dp)
+                        .clip(AppCardShape).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.94f))
+                        .padding(horizontal = 14.dp, vertical = 12.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("BACKING", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
                         Spacer(Modifier.width(8.dp))
-                        Text(backingName ?: "No backing track", modifier = Modifier.weight(1f), color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        IconAction("↺", "Restart backing track", onRewindBacking, enabled = backingDurationMs > 0L)
-                        IconAction(if (backingPlaying) "Ⅱ" else "▶", if (backingPlaying) "Pause backing" else "Play backing", onPreviewBacking, enabled = backingPeaks.isNotEmpty())
+                        Text(backingName ?: "No backing track", modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        AppIconButton(Icons.Filled.Replay, "Restart backing track", onRewindBacking, enabled = backingDurationMs > 0L)
+                        AppIconButton(
+                            if (backingPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                            if (backingPlaying) "Pause backing" else "Play backing",
+                            onPreviewBacking, enabled = backingPeaks.isNotEmpty()
+                        )
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("${time(backingPositionMs)} / ${time(backingDurationMs)}", color = Color.White, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(96.dp))
-                        if (backingPeaks.isNotEmpty()) Waveform(backingPeaks, MaterialTheme.colorScheme.primary, Modifier.weight(1f), backingProgress, onScrubBacking)
-                        else Spacer(Modifier.weight(1f))
+                        Text("${time(backingPositionMs)} / ${time(backingDurationMs)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(96.dp))
+                        if (backingPeaks.isNotEmpty()) {
+                            Waveform(
+                                peaks = backingPeaks,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.weight(1f),
+                                progress = backingProgress
+                            )
+                        } else Spacer(Modifier.weight(1f))
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("TAKE", style = MaterialTheme.typography.labelSmall, color = Color.White, modifier = Modifier.width(42.dp))
+                        Text("TAKE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.width(42.dp))
                         Waveform(livePeaks, MaterialTheme.colorScheme.secondary, Modifier.weight(1f), 1f)
                         Spacer(Modifier.width(10.dp)); Meter(interfaceLevel)
                     }
                     if (outputRoute.isNotBlank()) {
-                        Text(outputRoute, style = MaterialTheme.typography.labelSmall, color = Color.White, modifier = Modifier.fillMaxWidth(), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(outputRoute, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth(), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                        Button(onClick = onStopRecording, enabled = !isFinalizing, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB63E45))) {
-                            Text(if (isFinalizing) "SAVING TAKE…" else "STOP RECORDING")
+                        AppButton(
+                            if (isFinalizing) "SAVING TAKE…" else "STOP RECORDING",
+                            onStopRecording,
+                            enabled = !isFinalizing,
+                            containerColor = RecordRed,
+                            contentColor = Color.White
+                        )
+                    }
+                }
+            }
+        }
+
+        if (!isRecording) {
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)
+                    .background(MaterialTheme.colorScheme.surface, AppCardShape).padding(horizontal = 12.dp, vertical = 10.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("BACKING", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                    Spacer(Modifier.width(8.dp))
+                    Text(backingName ?: "Choose a backing track", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    AppIconButton(Icons.Filled.Replay, "Restart backing track", onRewindBacking, enabled = backingDurationMs > 0L)
+                    AppIconButton(
+                        if (backingPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        if (backingPlaying) "Pause backing" else "Play backing",
+                        onPreviewBacking, enabled = backingPeaks.isNotEmpty() && !isLoadingBacking
+                    )
+                    AppIconButton(Icons.Filled.Add, "Load backing track", onLoadBacking, enabled = !isLoadingBacking && !isRecording && !isStartingTake)
+                }
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("WAVE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(38.dp))
+                    if (backingPeaks.isNotEmpty()) {
+                        Waveform(
+                            peaks = backingPeaks,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.weight(1f),
+                            progress = backingProgress,
+                            onSeek = onScrubBacking
+                        )
+                    } else {
+                        Box(
+                            Modifier.weight(1f).height(44.dp)
+                                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(10.dp)),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            Text("No backing track loaded", Modifier.padding(start = 10.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
-            }
-        }
-
-        if (!isRecording) Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 10.dp, vertical = 8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("BACKING", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.width(68.dp))
-                Text(backingName ?: "Choose a backing track", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                IconAction("↺", "Restart backing track", onRewindBacking, enabled = backingDurationMs > 0L)
-                IconAction(if (backingPlaying) "Ⅱ" else "▶", if (backingPlaying) "Pause backing" else "Play backing", onPreviewBacking, enabled = backingPeaks.isNotEmpty() && !isLoadingBacking)
-                IconAction("＋", "Load backing track", onLoadBacking, enabled = !isLoadingBacking && !isRecording && !isStartingTake)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("BT", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(28.dp))
-                if (backingPeaks.isNotEmpty()) {
-                    Waveform(backingPeaks, MaterialTheme.colorScheme.primary, Modifier.weight(1f), backingProgress, onScrubBacking)
-                } else {
-                    Box(Modifier.weight(1f).height(48.dp).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.CenterStart) {
-                        Text("Tap + to load WAV / MP3", Modifier.padding(start = 10.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "${time(backingPositionMs)} / ${time(backingDurationMs)}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Box(
+                        Modifier.size(64.dp).background(RecordRed, CircleShape)
+                            .clickable(enabled = !isFinalizing && !isStartingTake && !isLoadingBacking) {
+                                if (isRecording) onStopRecording()
+                                else onStartRecording(File(outputDir, "video_${System.currentTimeMillis()}.mp4"))
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isRecording) {
+                            Box(Modifier.size(22.dp).background(Color.White, RoundedCornerShape(5.dp)))
+                        } else {
+                            Box(Modifier.size(21.dp).background(Color.White, CircleShape))
+                        }
                     }
+                    Text(
+                        if (isRecording) "STOP TAKE" else if (isStartingTake) "STARTING…" else if (isFinalizing) "SAVING…" else "RECORD",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.End
+                    )
+                }
+                if (outputRoute.isNotBlank()) {
+                    Text(outputRoute, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth(), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                if (status.isNotBlank()) {
+                    Text(status, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(top = 4.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-            if (isRecording) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("TAKE", style = MaterialTheme.typography.labelSmall, color = Color.White, modifier = Modifier.width(42.dp))
-                    Waveform(livePeaks, MaterialTheme.colorScheme.secondary, Modifier.weight(1f), 1f)
-                    Spacer(Modifier.width(10.dp)); Meter(interfaceLevel)
-                }
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 3.dp)) {
-                    Text("Input", style = MaterialTheme.typography.labelSmall, color = Color.White, modifier = Modifier.width(68.dp))
-                    Meter(interfaceLevel)
-                    Text(if (interfaceLevel > 0.01f) "Live input" else "No signal", style = MaterialTheme.typography.labelSmall, color = Color.White, modifier = Modifier.width(68.dp))
-                }
-            }
-            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("${time(backingPositionMs)} / ${time(backingDurationMs)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-                Box(
-                    Modifier.size(60.dp).background(
-                        if (isRecording) Color(0xFFB63E45) else Color(0xFFEA5A5E), CircleShape
-                    ).clickable(enabled = !isFinalizing && !isStartingTake && !isLoadingBacking) {
-                        if (isRecording) onStopRecording()
-                        else onStartRecording(File(outputDir, "video_${System.currentTimeMillis()}.mp4"))
-                    }, contentAlignment = Alignment.Center
-                ) {
-                    Box(Modifier.size(if (isRecording) 20.dp else 24.dp).background(Color.White, if (isRecording) MaterialTheme.shapes.small else CircleShape))
-                }
-                Text(if (isRecording) "STOP TAKE" else if (isStartingTake) "STARTING…" else if (isFinalizing) "SAVING…" else "RECORD", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.End)
-            }
-        if (outputRoute.isNotBlank()) {
-            Text(outputRoute, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth(), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (status.isNotBlank()) Text(status, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(top = 4.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-    }
-}
-
-@Composable
-private fun IconAction(icon: String, description: String, onClick: () -> Unit, enabled: Boolean = true) {
-    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.semantics { contentDescription = description }) {
-        Text(icon, color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.titleMedium)
     }
 }
 

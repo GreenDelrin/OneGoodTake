@@ -5,16 +5,29 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.socialmaster.app.audio.Track
 import com.socialmaster.app.ui.VideoPreview
 import com.socialmaster.app.ui.VideoPreviewController
 import com.socialmaster.app.ui.Waveform
+import com.socialmaster.app.ui.components.AppButton
+import com.socialmaster.app.ui.components.AppIconButton
+import com.socialmaster.app.ui.components.SectionLabel
+import com.socialmaster.app.ui.theme.AppButtonShape
+import com.socialmaster.app.ui.theme.AppCardShape
+import com.socialmaster.app.ui.theme.AppChipShape
+import com.socialmaster.app.ui.theme.RecordRed
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -44,7 +57,7 @@ fun MixingScreen(
     var targetMenuOpen by remember { mutableStateOf(false) }
     val editingTrack = tracks.firstOrNull { it.id == editingTrackId }
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp)) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 8.dp)) {
         VideoPreview(
             videoFile = videoFile,
             audioFile = null,
@@ -57,36 +70,60 @@ fun MixingScreen(
         )
         Spacer(Modifier.height(8.dp))
         Row(
-            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)).padding(horizontal = 12.dp, vertical = 8.dp),
+            Modifier.fillMaxWidth().clip(AppCardShape).background(MaterialTheme.colorScheme.surface).padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
-                Text("PREVIEW", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
-                Text("${time(previewPositionMs)} / ${time(previewDurationMs)} · video + live audio", style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                SectionLabel("PREVIEW")
+                Text(
+                    "${time(previewPositionMs)} / ${time(previewDurationMs)} · video + live audio",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
-            Button(onClick = onTogglePreview, enabled = tracks.isNotEmpty() && !isExporting) {
-                Text(if (isPreviewPreparing) "Loading…" else if (isPreviewPlaying) "Stop" else "Play preview")
-            }
+            AppButton(
+                if (isPreviewPreparing) "Loading…" else if (isPreviewPlaying) "Stop" else "Play preview",
+                onTogglePreview,
+                enabled = tracks.isNotEmpty() && !isExporting,
+                containerColor = if (isPreviewPlaying) RecordRed else MaterialTheme.colorScheme.primary,
+                contentColor = if (isPreviewPlaying) Color.White else MaterialTheme.colorScheme.onPrimary
+            )
         }
-        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(vertical = 6.dp)) {
+        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(tracks, key = { it.id }) { track ->
                 TrackLane(
                     track = track,
                     peaks = trackWaveforms[track.id].orEmpty(),
-                    progress = if (previewDurationMs > 0L) (previewPositionMs.toFloat() / previewDurationMs).coerceIn(0f, 1f) else 0f,
+                    progress = if (previewDurationMs > 0L) previewPositionMs.toFloat() / previewDurationMs else 0f,
                     enabled = !isExporting,
                     onTrackChange = onTrackChange,
                     onEditEffects = { editingTrackId = track.id }
                 )
-                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
             }
             if (tracks.isEmpty()) item {
                 Text("Finish a take to see your audio tracks here.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))
             }
         }
+        if (status.isNotBlank()) {
+            Text(
+                status,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Box {
-                OutlinedButton(onClick = { targetMenuOpen = true }, enabled = !isExporting) {
+                OutlinedButton(
+                    onClick = { targetMenuOpen = true },
+                    enabled = !isExporting,
+                    shape = AppButtonShape,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                ) {
                     Text("${targetLufs.toInt()} LUFS  ▾")
                 }
                 DropdownMenu(expanded = targetMenuOpen, onDismissRequest = { targetMenuOpen = false }) {
@@ -98,14 +135,20 @@ fun MixingScreen(
                     }
                 }
             }
-            Button(onClick = onExport, enabled = canExport && !isExporting, modifier = Modifier.weight(1f)) {
-                Text(if (isExporting) "Exporting…" else "Export")
-            }
+            AppButton(
+                if (isExporting) "Exporting…" else "Export",
+                onExport,
+                modifier = Modifier.weight(1f),
+                enabled = canExport && !isExporting
+            )
         }
     }
 
     if (editingTrack != null) {
-        ModalBottomSheet(onDismissRequest = { editingTrackId = null }) {
+        ModalBottomSheet(
+            onDismissRequest = { editingTrackId = null },
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+        ) {
             TrackEffectsSheet(editingTrack, onTrackChange, Modifier.fillMaxWidth().padding(horizontal = 16.dp))
         }
     }
@@ -120,29 +163,48 @@ private fun TrackLane(
     onTrackChange: (Track) -> Unit,
     onEditEffects: () -> Unit
 ) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+    Column(
+        Modifier.fillMaxWidth().clip(AppCardShape).background(MaterialTheme.colorScheme.surface).padding(horizontal = 14.dp, vertical = 10.dp)
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(track.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(if (track.id == "backing") "BACKING" else "TAKE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    if (track.id == "backing") "BACKING" else "TAKE",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (track.id == "backing") MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
+                )
             }
-            TextButton(onClick = { onTrackChange(track.copy(muted = !track.muted)) }, enabled = enabled) {
-                Text(if (track.muted) "MUTED" else "MUTE")
-            }
-            TextButton(onClick = onEditEffects, enabled = enabled) { Text("FX") }
+            AppIconButton(
+                if (track.muted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                if (track.muted) "Unmute ${track.name}" else "Mute ${track.name}",
+                { onTrackChange(track.copy(muted = !track.muted)) },
+                enabled = enabled,
+                tint = if (track.muted) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+            )
+            AppIconButton(Icons.Filled.Tune, "Effects on ${track.name}", onEditEffects, enabled = enabled)
         }
+        Spacer(Modifier.height(6.dp))
         if (peaks.isNotEmpty()) {
-            Waveform(peaks, if (track.id == "backing") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary, Modifier.fillMaxWidth().height(44.dp), progress)
+            Waveform(
+                peaks = peaks,
+                color = if (track.id == "backing") MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary,
+                modifier = Modifier.fillMaxWidth().height(44.dp),
+                progress = progress
+            )
         } else {
-            Box(Modifier.fillMaxWidth().height(44.dp).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.CenterStart) {
+            Box(
+                Modifier.fillMaxWidth().height(44.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.CenterStart
+            ) {
                 Text("Waveform unavailable", Modifier.padding(start = 10.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         var volume by remember(track.id) { mutableFloatStateOf(track.volumeDb) }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("VOL", style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(32.dp))
+            Text("VOL", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(34.dp))
             Slider(volume, { v -> volume = v; onTrackChange(track.copy(volumeDb = v)) }, Modifier.weight(1f), valueRange = -36f..6f)
-            Text("${volume.toInt()} dB", style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(48.dp))
+            Text("${volume.toInt()} dB", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(48.dp))
         }
     }
 }
@@ -182,7 +244,7 @@ private fun TrackEffectsSheet(track: Track, onTrackChange: (Track) -> Unit, modi
 @Composable
 private fun SliderRow(label: String, valueLabel: String, value: Float, range: ClosedFloatingPointRange<Float>, onChange: (Float) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(label, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(62.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(62.dp))
         Slider(value, onChange, Modifier.weight(1f), valueRange = range)
         Text(valueLabel, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(42.dp), maxLines = 1)
     }
