@@ -113,6 +113,7 @@ private fun AppRoot(activity: MainActivity) {
     var mixPreviewDurationMs by remember { mutableLongStateOf(0L) }
     var keepScreenOn by remember { mutableStateOf(restored["capture.keepScreenOn"]?.toBooleanStrictOrNull() ?: true) }
     var useFront by remember { mutableStateOf(restored["camera.front"]?.toBooleanStrictOrNull() ?: true) }
+    var cameraWasFront by remember { mutableStateOf(restored["camera.front"]?.toBooleanStrictOrNull() ?: true) }
     var mode by remember {
         mutableStateOf(InputChannelMode.values().firstOrNull { it.name == restored["capture.mode"] } ?: InputChannelMode.INPUTS_1_2_STEREO)
     }
@@ -342,8 +343,9 @@ private fun AppRoot(activity: MainActivity) {
         onDispose { insets.show(WindowInsetsCompat.Type.systemBars()) }
     }
 
-    LaunchedEffect(isRecording, isMonitoring) {
-        while (isRecording || isMonitoring) {
+    LaunchedEffect(isRecording) {
+        if (!isRecording) livePeaks = emptyList()
+        while (isRecording) {
             livePeaks = capture.livePeaks()
             kotlinx.coroutines.delay(60)
         }
@@ -598,7 +600,7 @@ private fun AppRoot(activity: MainActivity) {
                 val finalLufs = withContext(Dispatchers.IO) { Mastering.auto(masteringProject, mixOutput, masterOutput) }
                 status = "Exporting video…"
                 val muxed = withContext(Dispatchers.IO) {
-                    Exporter.export(video, masterOutput, videoOutput, syncOffset, trimStart, trimEnd)
+                    Exporter.export(video, masterOutput, videoOutput, syncOffset, trimStart, trimEnd, if (cameraWasFront) 270 else 90)
                 }
                 if (!muxed) throw IllegalStateException("Could not combine the video and mastered audio")
                 status = "Saving to Gallery…"
@@ -625,7 +627,7 @@ private fun AppRoot(activity: MainActivity) {
                     isFinalizing = isFinalizing,
                     isStartingTake = isStartingTake,
                     useFrontCamera = useFront,
-                    onToggleCamera = { useFront = !useFront; camera.toggleCamera() },
+                    onToggleCamera = { useFront = !useFront; cameraWasFront = useFront; camera.toggleCamera() },
                     onStartRecording = ::beginTake,
                     onStopRecording = ::finishTake,
                     backingName = backingDisplayName,

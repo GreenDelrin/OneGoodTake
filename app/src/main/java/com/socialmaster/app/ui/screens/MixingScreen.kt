@@ -138,6 +138,12 @@ private fun TrackLane(
                 Text("Waveform unavailable", Modifier.padding(start = 10.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+        var volume by remember(track.id) { mutableFloatStateOf(track.volumeDb) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("VOL", style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(32.dp))
+            Slider(volume, { v -> volume = v; onTrackChange(track.copy(volumeDb = v)) }, Modifier.weight(1f), valueRange = -36f..6f)
+            Text("${volume.toInt()} dB", style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(48.dp))
+        }
     }
 }
 
@@ -158,7 +164,6 @@ private fun TrackEffectsSheet(track: Track, onTrackChange: (Track) -> Unit, modi
     Column(modifier.padding(bottom = 24.dp)) {
         Text(track.name, style = MaterialTheme.typography.titleLarge)
         Text("Changes are heard in Live Audio.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        SliderRow("LEVEL", "${volume.toInt()} dB", volume, -36f..6f, { volume = it; update() })
         SliderRow("PAN", if (pan < -0.05f) "L" else if (pan > 0.05f) "R" else "C", pan, -1f..1f, { pan = it; update() })
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             EffectSlider("LOW", low, { low = it; update() }, Modifier.weight(1f))
