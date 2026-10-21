@@ -134,7 +134,7 @@ fun RecordingScreen(
             if (isRecording) {
                 Column(
                     Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 10.dp, vertical = 10.dp)
-                        .clip(AppCardShape).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.94f))
+                        .clip(AppCardShape).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f))
                         .padding(horizontal = 14.dp, vertical = 12.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -155,13 +155,15 @@ fun RecordingScreen(
                                 peaks = backingPeaks,
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.weight(1f),
-                                progress = backingProgress
+                                progress = backingProgress,
+                                background = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                onSeek = onScrubBacking
                             )
                         } else Spacer(Modifier.weight(1f))
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("TAKE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.width(42.dp))
-                        Waveform(livePeaks, MaterialTheme.colorScheme.secondary, Modifier.weight(1f), 1f)
+                        Waveform(livePeaks, MaterialTheme.colorScheme.secondary, Modifier.weight(1f), 1f, MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                         Spacer(Modifier.width(10.dp)); Meter(interfaceLevel)
                     }
                     if (outputRoute.isNotBlank()) {

@@ -1,8 +1,10 @@
 package com.socialmaster.app
 
 import android.Manifest
+import android.app.Activity
 import android.content.ContentValues
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.pm.PackageManager
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
@@ -32,10 +34,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import com.socialmaster.app.audio.AudioCapture
 import com.socialmaster.app.audio.AudioDecoder
 import com.socialmaster.app.audio.BackingLibraryEntry
@@ -81,12 +85,41 @@ class MainActivity : ComponentActivity() {
         darkTheme = restored["ui.dark"]?.toBooleanStrictOrNull() ?: true
         setContent {
             SocialMasterTheme(darkTheme) {
+                SystemBars(darkTheme)
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     AppRoot(this, restored, darkTheme) { darkTheme = !darkTheme }
                 }
             }
         }
     }
+}
+
+/** Paints the status and navigation bars with the app background so no grey band shows. */
+@Composable
+private fun SystemBars(darkTheme: Boolean) {
+    val view = LocalView.current
+    val background = MaterialTheme.colorScheme.background.toArgb()
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context.findActivity())?.window ?: return@SideEffect
+            @Suppress("DEPRECATION")
+            window.statusBarColor = background
+            @Suppress("DEPRECATION")
+            window.navigationBarColor = background
+            val controller = WindowInsetsControllerCompat(window, view)
+            controller.isAppearanceLightStatusBars = !darkTheme
+            controller.isAppearanceLightNavigationBars = !darkTheme
+        }
+    }
+}
+
+private fun Context.findActivity(): Activity? {
+    var current: Context? = this
+    while (current != null) {
+        if (current is Activity) return current
+        current = (current as? ContextWrapper)?.baseContext
+    }
+    return null
 }
 
 @Composable
