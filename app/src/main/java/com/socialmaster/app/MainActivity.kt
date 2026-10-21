@@ -67,6 +67,8 @@ import com.socialmaster.app.ui.screens.InputSetupDialog
 import com.socialmaster.app.ui.screens.BackingLibraryDialog
 import com.socialmaster.app.ui.screens.MixingScreen
 import com.socialmaster.app.ui.screens.RecordingScreen
+import com.socialmaster.app.ui.screens.SetupWizard
+import com.socialmaster.app.ui.screens.WizardStep
 import com.socialmaster.app.ui.theme.AppButtonShape
 import com.socialmaster.app.ui.theme.SocialMasterTheme
 import kotlinx.coroutines.CompletableDeferred
@@ -183,6 +185,9 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
     var routeInfo by remember { mutableStateOf("") }
     var inputDiagnostics by remember { mutableStateOf("") }
     var outputRoute by remember { mutableStateOf("") }
+    var wizardStep by remember { mutableStateOf(restored["wizard.step"]?.toIntOrNull() ?: WizardStep.WELCOME) }
+    var wizardDone by remember { mutableStateOf(restored["wizard.done"]?.toBooleanStrictOrNull() == true) }
+    var wizardOpen by remember { mutableStateOf(!wizardDone) }
     var status by remember { mutableStateOf("") }
     var livePeaks by remember { mutableStateOf<List<Float>>(emptyList()) }
     var backingPeaks by remember { mutableStateOf<List<Float>>(emptyList()) }
@@ -223,6 +228,8 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
         snapshot["camera.front"] = (camera.cameras.getOrNull(camera.cameraIndex)?.isFront ?: true).toString()
         snapshot["camera.index"] = camera.cameraIndex.toString()
         snapshot["ui.dark"] = darkTheme.toString()
+        snapshot["wizard.step"] = wizardStep.toString()
+        snapshot["wizard.done"] = wizardDone.toString()
         snapshot["capture.mode"] = mode.name
         snapshot["capture.profile"] = sourceProfile.name
         snapshot["capture.profileManual"] = sourceProfileManuallySelected.toString()
@@ -247,11 +254,20 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
         hasPermissions = results.values.all { it }
         if (!hasPermissions) status = "Camera and microphone access are required to record a take."
     }
-    LaunchedEffect(Unit) {
+    fun requestPermissions() {
         val required = arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
         if (required.all { ContextCompat.checkSelfPermission(activity, it) == PackageManager.PERMISSION_GRANTED }) {
             hasPermissions = true
         } else permissionLauncher.launch(required)
+    }
+    LaunchedEffect(Unit) {
+        val required = arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
+        if (required.all { ContextCompat.checkSelfPermission(activity, it) == PackageManager.PERMISSION_GRANTED }) {
+            hasPermissions = true
+        } else if (!wizardOpen) {
+            // The setup wizard asks for these itself, so do not interrupt it.
+            permissionLauncher.launch(required)
+        }
     }
     LaunchedEffect(inputDevices, userSelectedInput, selectedDeviceId, selectedDeviceIdentity, sourceProfileManuallySelected) {
         if (!userSelectedInput && selectedDeviceId == null) {
@@ -310,7 +326,7 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
     LaunchedEffect(
         screen, mode, sourceProfile, sourceProfileManuallySelected, selectedDeviceIdentity,
         userSelectedInput, monitorInput, keepScreenOn, backingTrack, backingDisplayName,
-        backingLibrary, cameraLabel, darkTheme,
+        backingLibrary, cameraLabel, darkTheme, wizardStep, wizardDone,
         backingPositionMs, backingPlaying, completedVideo, videoDurationMs, isExporting,
         measuredLufs, trackVersion, project.syncOffsetMs, project.master.makeupGainDb,
         project.trimStartMs, project.trimEndMs, project.master.limiterThresholdDb,
@@ -475,6 +491,36 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
                 }
             }
         }
+    }
+
+    fun selectInputDevice(id: Int?) {
+        if (isMonitoring) { isMonitoring = false; scope.launch(Dispatchers.IO) { capture.stop() } }
+        selectedDeviceId = id
+        selectedDeviceIdentity = inputDevices.firstOrNull { it.id == id }?.workspaceIdentity().orEmpty()
+        userSelectedInput = true
+        if (id == null || inputDevices.none { it.id == id && it.isUsbAudioInput() }) {
+            sourceProfile = InputSourceProfile.RAW
+            sourceProfileManuallySelected = false
+        }
+        levels = InputLevels(0f, 0f)
+        routeInfo = ""
+        inputDiagnostics = ""
+    }
+
+    fun wizardNext() {
+        if (wizardStep < WizardStep.LAST) {
+            wizardStep++
+        } else {
+            wizardOpen = false
+            wizardDone = true
+            if (!hasPermissions) requestPermissions()
+        }
+    }
+
+    fun wizardSkip() {
+        wizardOpen = false
+        wizardDone = true
+        if (!hasPermissions) requestPermissions()
     }
 
     /** Starting at the very end would play nothing, so a finished track restarts. */
@@ -786,17 +832,7 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
             devices = inputDevices,
             selectedDeviceId = selectedDeviceId,
             onDeviceSelected = { id ->
-                if (isMonitoring) { isMonitoring = false; scope.launch(Dispatchers.IO) { capture.stop() } }
-                selectedDeviceId = id
-                selectedDeviceIdentity = inputDevices.firstOrNull { it.id == id }?.workspaceIdentity().orEmpty()
-                userSelectedInput = true
-                if (id == null || inputDevices.none { it.id == id && it.isUsbAudioInput() }) {
-                    sourceProfile = InputSourceProfile.RAW
-                    sourceProfileManuallySelected = false
-                }
-                levels = InputLevels(0f, 0f)
-                routeInfo = ""
-                inputDiagnostics = ""
+                selectInputDevice(id)
             },
             mode = mode,
             onModeSelected = { selected ->
@@ -826,11 +862,57 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
             statusMessage = status,
             keepScreenOn = keepScreenOn,
             onKeepScreenOnChanged = { keepScreenOn = it },
+            onRunSetupWizard = {
+                settingsOpen = false
+                wizardStep = WizardStep.WELCOME
+                wizardOpen = true
+            },
             onDismiss = {
                 settingsOpen = false
                 if (isMonitoring) { isMonitoring = false; scope.launch(Dispatchers.IO) { capture.stop() } }
                 status = ""
             }
+        )
+    }
+
+    if (wizardOpen) {
+        SetupWizard(
+            step = wizardStep,
+            hasPermissions = hasPermissions,
+            onRequestPermissions = ::requestPermissions,
+            devices = inputDevices,
+            selectedDeviceId = selectedDeviceId,
+            onDeviceSelected = ::selectInputDevice,
+            mode = mode,
+            onModeSelected = { selected ->
+                if (isMonitoring) { isMonitoring = false; scope.launch(Dispatchers.IO) { capture.stop() } }
+                mode = selected
+                levels = InputLevels(0f, 0f)
+                routeInfo = ""
+                inputDiagnostics = ""
+            },
+            sourceProfile = sourceProfile,
+            onSourceProfileSelected = { selected ->
+                if (isMonitoring) { isMonitoring = false; scope.launch(Dispatchers.IO) { capture.stop() } }
+                levels = InputLevels(0f, 0f)
+                routeInfo = ""
+                inputDiagnostics = ""
+                sourceProfile = selected
+                sourceProfileManuallySelected = true
+                status = if (selected == InputSourceProfile.USB_DIRECT) "Requesting direct USB permission…" else ""
+            },
+            monitorInput = monitorInput,
+            onMonitorInputChanged = { monitorInput = it },
+            isTesting = isMonitoring,
+            onToggleTest = ::startInputTest,
+            levels = levels,
+            routeInfo = routeInfo,
+            outputRoute = outputRoute,
+            backingName = backingDisplayName,
+            onLoadBacking = { backingLibraryOpen = true },
+            onBack = { wizardStep = (wizardStep - 1).coerceAtLeast(WizardStep.WELCOME) },
+            onNext = ::wizardNext,
+            onSkip = ::wizardSkip
         )
     }
 

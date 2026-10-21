@@ -34,6 +34,7 @@ fun InputSetupDialog(
     statusMessage: String,
     keepScreenOn: Boolean,
     onKeepScreenOnChanged: (Boolean) -> Unit,
+    onRunSetupWizard: () -> Unit,
     onDismiss: () -> Unit
 ) {
     AlertDialog(
@@ -147,6 +148,7 @@ fun InputSetupDialog(
                     Text("Keep screen awake", modifier = Modifier.weight(1f))
                     Switch(keepScreenOn, onKeepScreenOnChanged)
                 }
+                TextButton(onClick = onRunSetupWizard) { Text("Run the setup wizard again") }
             }
         },
         confirmButton = {
