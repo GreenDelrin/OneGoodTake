@@ -3,16 +3,19 @@ package com.socialmaster.app.player
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
+import android.media.AudioDeviceInfo
 import android.media.AudioTrack
 import android.net.Uri
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
+import com.socialmaster.app.audio.OutputRouter
 import kotlin.math.max
 
 /** Thin wrapper around ExoPlayer for backing-track playback and mix preview. */
 class AudioPlayer(private val context: Context) {
     private var player: ExoPlayer? = null
     private var warmedUp = false
+    private var outputDevice: AudioDeviceInfo? = null
 
     private fun ensure(): ExoPlayer {
         if (player == null) player = ExoPlayer.Builder(context).build()
@@ -58,6 +61,15 @@ class AudioPlayer(private val context: Context) {
     /** Play a local file from a timeline position. */
     fun play(file: java.io.File, loop: Boolean = false, startPositionMs: Long = 0L) {
         val p = ensure()
+        // Keep the backing track on the same device the monitor uses, otherwise it leaves through
+        // the phone while the interface stays silent.
+        val target = OutputRouter.pick(context)
+        if (target != null) {
+            p.setPreferredAudioDevice(target)
+            outputDevice = target
+        } else {
+            outputDevice = null
+        }
         p.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)))
         p.repeatMode = if (loop) ExoPlayer.REPEAT_MODE_ALL else ExoPlayer.REPEAT_MODE_OFF
         p.volume = 1.0f
@@ -65,6 +77,9 @@ class AudioPlayer(private val context: Context) {
         if (startPositionMs > 0L) p.seekTo(startPositionMs)
         p.play()
     }
+
+    /** Where the backing track is being sent. */
+    fun routeDescription(): String = "Backing out: ${OutputRouter.describe(outputDevice)}"
 
     fun seekTo(positionMs: Long) { player?.seekTo(positionMs.coerceAtLeast(0L)) }
     fun currentPositionMs(): Long = player?.currentPosition?.coerceAtLeast(0L) ?: 0L

@@ -54,6 +54,7 @@ fun RecordingScreen(
     livePeaks: List<Float>,
     interfaceLevel: Float,
     routeInfo: String,
+    outputRoute: String,
     status: String,
     outputDir: File,
     onOpenSetup: () -> Unit
@@ -77,7 +78,7 @@ fun RecordingScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("SOCIALMASTER v1.2", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                    Text("SOCIALMASTER v1.3", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                     Text(if (isRecording) "RECORDING" else if (isFinalizing) "SAVING TAKE" else "READY TO RECORD", style = MaterialTheme.typography.labelSmall, color = if (isRecording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Text(if (useFrontCamera) "FRONT" else "REAR", style = MaterialTheme.typography.labelSmall, color = Color.White)
@@ -128,6 +129,9 @@ fun RecordingScreen(
                         Text("TAKE", style = MaterialTheme.typography.labelSmall, color = Color.White, modifier = Modifier.width(42.dp))
                         Waveform(livePeaks, MaterialTheme.colorScheme.secondary, Modifier.weight(1f), 1f)
                         Spacer(Modifier.width(10.dp)); Meter(interfaceLevel)
+                    }
+                    if (outputRoute.isNotBlank()) {
+                        Text(outputRoute, style = MaterialTheme.typography.labelSmall, color = Color.White, modifier = Modifier.fillMaxWidth(), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                         Button(onClick = onStopRecording, enabled = !isFinalizing, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB63E45))) {
@@ -182,6 +186,9 @@ fun RecordingScreen(
                 }
                 Text(if (isRecording) "STOP TAKE" else if (isStartingTake) "STARTING…" else if (isFinalizing) "SAVING…" else "RECORD", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.End)
             }
+        if (outputRoute.isNotBlank()) {
+            Text(outputRoute, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth(), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
         if (status.isNotBlank()) Text(status, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(top = 4.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }

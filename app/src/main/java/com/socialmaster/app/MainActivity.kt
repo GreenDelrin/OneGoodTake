@@ -41,6 +41,7 @@ import com.socialmaster.app.audio.InputLevels
 import com.socialmaster.app.audio.InputSourceProfile
 import com.socialmaster.app.audio.Mastering
 import com.socialmaster.app.audio.Mixer
+import com.socialmaster.app.audio.OutputTest
 import com.socialmaster.app.audio.Project
 import com.socialmaster.app.audio.RealtimeMixPlayer
 import com.socialmaster.app.audio.Track
@@ -136,6 +137,7 @@ private fun AppRoot(activity: MainActivity) {
     var levels by remember { mutableStateOf(InputLevels(0f, 0f)) }
     var routeInfo by remember { mutableStateOf("") }
     var inputDiagnostics by remember { mutableStateOf("") }
+    var outputRoute by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("") }
     var livePeaks by remember { mutableStateOf<List<Float>>(emptyList()) }
     var backingPeaks by remember { mutableStateOf<List<Float>>(emptyList()) }
@@ -428,6 +430,14 @@ private fun AppRoot(activity: MainActivity) {
         }
     }
 
+    fun testOutput() {
+        status = "Playing a 1 kHz test tone…"
+        OutputTest.play(activity) { result ->
+            status = result
+            outputRoute = result
+        }
+    }
+
     fun startInputTest() {
         if (isMonitoring) {
             isMonitoring = false; levels = InputLevels(0f, 0f); routeInfo = ""; status = ""
@@ -439,6 +449,7 @@ private fun AppRoot(activity: MainActivity) {
             onRoute = { routeInfo = it },
             onError = { status = it; if (isMonitoring) isMonitoring = false },
             onDiagnostics = { inputDiagnostics = it },
+            onOutput = { outputRoute = it },
             monitorInput = monitorInput,
             sourceProfile = sourceProfile
         )
@@ -455,6 +466,7 @@ private fun AppRoot(activity: MainActivity) {
                 onRoute = { routeInfo = it },
                 onError = { message -> activity.runOnUiThread { status = message } },
                 onDiagnostics = { inputDiagnostics = it },
+                onOutput = { route -> activity.runOnUiThread { outputRoute = route } },
                 monitorInput = monitorInput,
                 sourceProfile = sourceProfile
             )
@@ -572,7 +584,8 @@ private fun AppRoot(activity: MainActivity) {
                 isMixPreviewPlaying = false
                 mixPreviewPositionMs = mixPreview.positionMs
                 if (error != null) status = "Mix preview failed: $error"
-            }
+            },
+            onRoute = { route -> activity.runOnUiThread { outputRoute = route } }
         )
     }
 
@@ -643,7 +656,11 @@ private fun AppRoot(activity: MainActivity) {
                         val file = backingTrack
                         if (file != null) {
                             if (backingPlaying) { backingPositionMs = backingPlayer.currentPositionMs(); backingPlayer.pause(); backingPlaying = false }
-                            else { backingPlayer.play(file, loop = false, startPositionMs = backingPositionMs); backingPlaying = true }
+                            else {
+                                backingPlayer.play(file, loop = false, startPositionMs = backingPositionMs)
+                                backingPlaying = true
+                                outputRoute = backingPlayer.routeDescription()
+                            }
                         }
                     },
                     onRewindBacking = { backingPositionMs = 0L; backingPlayer.seekTo(0L) },
@@ -657,6 +674,7 @@ private fun AppRoot(activity: MainActivity) {
                     livePeaks = livePeaks,
                     interfaceLevel = maxOf(levels.left, levels.right),
                     routeInfo = routeInfo,
+                    outputRoute = outputRoute,
                     status = status,
                     outputDir = outputDir,
                     onOpenSetup = { settingsOpen = true }
@@ -752,6 +770,8 @@ private fun AppRoot(activity: MainActivity) {
             onMonitorInputChanged = { monitorInput = it },
             levels = levels,
             routedDevice = routeInfo,
+            outputRoute = outputRoute,
+            onTestOutput = ::testOutput,
             diagnostics = inputDiagnostics,
             statusMessage = status,
             keepScreenOn = keepScreenOn,

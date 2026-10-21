@@ -71,7 +71,7 @@ fun warmUp() {
     @Synchronized
     fun play(
         tracks: List<Track>, trimStartMs: Long, trimEndMs: Long,
-        onStarted: () -> Unit, onFinished: (String?) -> Unit
+        onStarted: () -> Unit, onFinished: (String?) -> Unit, onRoute: (String) -> Unit = {}
     ) {
         stop()
         val runId = ++generation
@@ -145,6 +145,7 @@ fun warmUp() {
                 if (!running || generation != runId) return@Thread
 
                 val block = ShortArray(BLOCK_FRAMES * 2)
+                var routeReported = false
                 while (running && generation == runId) {
                     val frames = engine.render(block, BLOCK_FRAMES)
                     if (frames == 0) break
@@ -155,6 +156,11 @@ fun warmUp() {
                         if (result < 0) throw IllegalStateException("Audio output failed ($result)")
                         if (result == 0) Thread.sleep(2)
                         written += result
+                    }
+                    if (!routeReported) {
+                        routeReported = true
+                        val ready = checkNotNull(audio)
+                        main.post { if (generation == runId) onRoute("Mix out: ${OutputRouter.describe(ready)}") }
                     }
                     positionMs = engine.positionMs
                 }

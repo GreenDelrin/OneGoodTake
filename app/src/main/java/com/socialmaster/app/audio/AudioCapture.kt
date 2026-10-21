@@ -115,9 +115,10 @@ class AudioCapture(private val context: Context) {
         onRoute: (String) -> Unit,
         onError: (String) -> Unit,
         onDiagnostics: (String) -> Unit = {},
+        onOutput: (String) -> Unit = {},
         monitorInput: Boolean = false,
         sourceProfile: InputSourceProfile = InputSourceProfile.RAW
-    ): Boolean = startCapture(null, deviceId, mode, onLevels, onRoute, onError, onDiagnostics, monitorInput, sourceProfile)
+    ): Boolean = startCapture(null, deviceId, mode, onLevels, onRoute, onError, onDiagnostics, onOutput, monitorInput, sourceProfile)
 
     fun startRecording(
         output: File, deviceId: Int?, mode: InputChannelMode,
@@ -125,9 +126,10 @@ class AudioCapture(private val context: Context) {
         onRoute: (String) -> Unit,
         onError: (String) -> Unit,
         onDiagnostics: (String) -> Unit = {},
+        onOutput: (String) -> Unit = {},
         monitorInput: Boolean = false,
         sourceProfile: InputSourceProfile = InputSourceProfile.RAW
-    ): Boolean = startCapture(output, deviceId, mode, onLevels, onRoute, onError, onDiagnostics, monitorInput, sourceProfile)
+    ): Boolean = startCapture(output, deviceId, mode, onLevels, onRoute, onError, onDiagnostics, onOutput, monitorInput, sourceProfile)
 
     private fun startCapture(
         output: File?, deviceId: Int?, mode: InputChannelMode,
@@ -135,6 +137,7 @@ class AudioCapture(private val context: Context) {
         onRoute: (String) -> Unit,
         onError: (String) -> Unit,
         onDiagnostics: (String) -> Unit,
+        onOutput: (String) -> Unit,
         monitorInput: Boolean,
         sourceProfile: InputSourceProfile
     ): Boolean {
@@ -142,12 +145,12 @@ class AudioCapture(private val context: Context) {
         synchronized(peaks) { peaks.clear() }
         if (sourceProfile == InputSourceProfile.USB_DIRECT) {
             var directError = "UAC2 direct capture could not start."
-            if (startUsbCapture(output, deviceId, mode, onLevels, onRoute, { directError = it }, onDiagnostics, monitorInput)) return true
+            if (startUsbCapture(output, deviceId, mode, onLevels, onRoute, { directError = it }, onDiagnostics, onOutput, monitorInput)) return true
             return startCapture(
                 output, deviceId, mode, onLevels, onRoute,
                 { onError("Direct USB failed ($directError); Android backup failed: $it") },
                 { onDiagnostics("Direct USB unavailable ($directError); Android AudioRecord backup: $it") },
-                monitorInput, InputSourceProfile.RAW
+                onOutput, monitorInput, InputSourceProfile.RAW
             )
         }
         val device = deviceId?.let { id -> availableInputDevices().firstOrNull { it.id == id } }
@@ -260,6 +263,7 @@ class AudioCapture(private val context: Context) {
                 var routeWaitReads = 0
                 var totalFramesRead = 0L
                 var lastDiagnosticsAt = 0L
+                var outputReported = false
                 while (running) {
                     val count = ar.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
                     if (count < 0) {
@@ -293,6 +297,11 @@ class AudioCapture(private val context: Context) {
                         }
                     }
                     val input = buffer.copyOf(alignedCount)
+                    if (!outputReported) {
+                        outputReported = true
+                        val route = monitorTrack?.let { "Monitor out: ${OutputRouter.describe(it)}" } ?: "Headphone monitoring is off"
+                        post { onOutput(route) }
+                    }
                     val channelPeakValues = PcmLevelAnalyzer.peaks(input, inputChannels)
                     val leftPeak = if (inputChannels > 1 || mode.channelSelection != PcmChannelMapper.RIGHT) channelPeakValues[0] else 0
                     val rightPeak = when {
@@ -363,6 +372,7 @@ class AudioCapture(private val context: Context) {
         onRoute: (String) -> Unit,
         onError: (String) -> Unit,
         onDiagnostics: (String) -> Unit,
+        onOutput: (String) -> Unit,
         monitorInput: Boolean
     ): Boolean {
         val usbDevice = resolveUsbDevice(deviceId) ?: run {
@@ -479,11 +489,17 @@ class AudioCapture(private val context: Context) {
                 val framesPerRead = maxOf(256, sampleRate / 100)
                 val buffer = FloatArray(framesPerRead * inputChannels)
                 val channelPeaks = FloatArray(inputChannels)
+                var outputReported = false
                 while (running) {
                     val framesRead = NativeUsb.read(buffer, framesPerRead)
                     if (framesRead <= 0) {
                         Thread.sleep(3)
                         continue
+                    }
+                    if (!outputReported) {
+                        outputReported = true
+                        val route = monitorTrack?.let { "Monitor out: ${OutputRouter.describe(it)}" } ?: "Headphone monitoring is off"
+                        post { onOutput(route) }
                     }
                     val sampleCount = framesRead * inputChannels
                     channelPeaks.fill(0f)
