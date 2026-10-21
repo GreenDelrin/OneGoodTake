@@ -45,14 +45,6 @@ fun MixingScreen(
     val editingTrack = tracks.firstOrNull { it.id == editingTrackId }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp)) {
-        Row(verticalAlignment = Alignment.Bottom) {
-            Column(Modifier.weight(1f)) {
-                Text("Edit take", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
-                Text("Trim the picture. Shape each track while you listen.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Text("${tracks.size} TRACK${if (tracks.size == 1) "" else "S"}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
-        }
-        Spacer(Modifier.height(8.dp))
         VideoPreview(
             videoFile = videoFile,
             audioFile = null,
@@ -76,7 +68,6 @@ fun MixingScreen(
                 Text(if (isPreviewPreparing) "Loading…" else if (isPreviewPlaying) "Stop" else "Play preview")
             }
         }
-        if (status.isNotBlank()) Text(status, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(vertical = 6.dp)) {
             items(tracks, key = { it.id }) { track ->
                 TrackLane(
@@ -90,7 +81,7 @@ fun MixingScreen(
                 HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
             }
             if (tracks.isEmpty()) item {
-                Text("Finish a take to see its audio tracks here.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))
+                Text("Finish a take to see your audio tracks here.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))
             }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

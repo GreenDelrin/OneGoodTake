@@ -79,7 +79,7 @@ fun RecordingScreen(
                     Text(if (isRecording) "RECORDING" else if (isFinalizing) "SAVING TAKE" else "READY TO RECORD", style = MaterialTheme.typography.labelSmall, color = if (isRecording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Text(if (useFrontCamera) "FRONT" else "REAR", style = MaterialTheme.typography.labelSmall, color = Color.White)
-                IconAction("⟳", "Flip camera", onToggleCamera, enabled = !isRecording && !isFinalizing && !isStartingTake)
+                IconAction("📷", "Flip camera", onToggleCamera, enabled = !isRecording && !isFinalizing && !isStartingTake)
                 IconAction("⚙", "Recording setup", onOpenSetup, enabled = !isRecording && !isFinalizing && !isStartingTake)
             }
             if (isLoadingBacking) {
@@ -146,8 +146,9 @@ fun RecordingScreen(
                 Waveform(livePeaks, MaterialTheme.colorScheme.secondary, Modifier.weight(1f), if (isRecording) 1f else backingProgress)
             }
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 3.dp)) {
-                Text(routeInfo.ifBlank { "Input not tested" }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("Input", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(68.dp))
                 Meter(interfaceLevel)
+                Text(if (interfaceLevel > 0.01f) "Live input" else "No signal", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(68.dp))
             }
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("${time(backingPositionMs)} / ${time(backingDurationMs)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))

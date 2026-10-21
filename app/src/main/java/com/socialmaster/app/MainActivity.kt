@@ -425,7 +425,7 @@ private fun AppRoot(activity: MainActivity) {
 
     fun startInputTest() {
         if (isMonitoring) {
-            isMonitoring = false; levels = InputLevels(0f, 0f); routeInfo = ""
+            isMonitoring = false; levels = InputLevels(0f, 0f); routeInfo = ""; status = ""
             scope.launch(Dispatchers.IO) { capture.stop() }
             return
         }
@@ -754,6 +754,7 @@ private fun AppRoot(activity: MainActivity) {
             onDismiss = {
                 settingsOpen = false
                 if (isMonitoring) { isMonitoring = false; scope.launch(Dispatchers.IO) { capture.stop() } }
+                status = ""
             }
         )
     }

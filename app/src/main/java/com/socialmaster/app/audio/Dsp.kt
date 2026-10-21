@@ -62,6 +62,7 @@ object Dsp {
     }
 
     // FDN reverb (4-line) with Hadamard feedback + lowpass damping
+    // Dry signal stays at full level, wet signal is mixed in at 'mix' level
     fun reverb(samples: ShortArray, sr: Int, mix: Float): ShortArray {
         if (mix <= 0f) return samples
         val delays = intArrayOf((sr*0.0297).toInt(), (sr*0.0371).toInt(), (sr*0.0411).toInt(), (sr*0.0437).toInt())
@@ -85,7 +86,8 @@ object Dsp {
                 idx[c] = (idx[c] + 1) % delays[c]
             }
             val wet = (dv[0] + dv[1] + dv[2] + dv[3]) * 0.25f
-            out[i] = (samples[i] * (1 - mix) + wet * mix).coerceIn(-32768f, 32767f)
+            // Dry signal stays at full level, wet mixed in at 'mix' level
+            out[i] = (samples[i].toFloat() + wet * mix).coerceIn(-32768f, 32767f)
         }
         return ShortArray(out.size) { i -> out[i].toInt().toShort() }
     }

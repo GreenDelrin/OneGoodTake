@@ -222,31 +222,59 @@ private class RealtimeBiquad(
 }
 
 private class RealtimeReverb(sampleRate: Int) {
-    private val delays = intArrayOf((sampleRate * 0.0297).toInt(), (sampleRate * 0.0371).toInt(), (sampleRate * 0.0411).toInt(), (sampleRate * 0.0437).toInt())
+    // Plate reverb: longer delays, higher density, longer decay, HF damping
+    private val delays = intArrayOf(
+        (sampleRate * 0.045).toInt(), (sampleRate * 0.063).toInt(),
+        (sampleRate * 0.078).toInt(), (sampleRate * 0.092).toInt(),
+        (sampleRate * 0.115).toInt(), (sampleRate * 0.137).toInt(),
+        (sampleRate * 0.168).toInt(), (sampleRate * 0.197).toInt()
+    )
     private val lines = Array(2) { Array(delays.size) { line -> FloatArray(delays[line]) } }
     private val positions = IntArray(delays.size)
-    private val feedback = 0.35f
+    // Plate reverb: longer decay, HF damping
+    private val feedback = 0.75f
+    private val damp = 0.15f  // HF damping for metal plate character
 
     fun process(left: Float, right: Float, amount: Float, output: FloatArray) {
-        val i0 = positions[0]; val i1 = positions[1]; val i2 = positions[2]; val i3 = positions[3]
-        val l0 = lines[0][0][i0]; val l1 = lines[0][1][i1]; val l2 = lines[0][2][i2]; val l3 = lines[0][3][i3]
-        val r0 = lines[1][0][i0]; val r1 = lines[1][1][i1]; val r2 = lines[1][2][i2]; val r3 = lines[1][3][i3]
-        val ml0 = (l0 + l1 + l2 + l3) * 0.5f
-        val ml1 = (l0 - l1 + l2 - l3) * 0.5f
-        val ml2 = (l0 + l1 - l2 - l3) * 0.5f
-        val ml3 = (l0 - l1 - l2 + l3) * 0.5f
-        val mr0 = (r0 + r1 + r2 + r3) * 0.5f
-        val mr1 = (r0 - r1 + r2 - r3) * 0.5f
-        val mr2 = (r0 + r1 - r2 - r3) * 0.5f
-        val mr3 = (r0 - r1 - r2 + r3) * 0.5f
-        lines[0][0][i0] = left + ml0 * feedback; lines[0][1][i1] = ml1 * feedback
-        lines[0][2][i2] = ml2 * feedback; lines[0][3][i3] = ml3 * feedback
-        lines[1][0][i0] = right + mr0 * feedback; lines[1][1][i1] = mr1 * feedback
-        lines[1][2][i2] = mr2 * feedback; lines[1][3][i3] = mr3 * feedback
-        for (i in positions.indices) positions[i] = (positions[i] + 1) % delays[i]
-        val wetLeft = (l0 + l1 + l2 + l3) * 0.25f
-        val wetRight = (r0 + r1 + r2 + r3) * 0.25f
-        output[0] = left * (1f - amount) + wetLeft * amount
-        output[1] = right * (1f - amount) + wetRight * amount
+        // Read delayed samples
+        val l = FloatArray(delays.size) { lines[0][it][positions[it]] }
+        val r = FloatArray(delays.size) { lines[1][it][positions[it]] }
+
+        // Hadamard mix for diffusion (8x8 matrix)
+        val mixed = FloatArray(delays.size)
+        for (i in 0 until 4) {
+            val a = l[i]; val b = l[i+4]
+            val c = r[i]; val d = r[i+4]
+            mixed[i] = (l[i] + l[i+4]) * 0.5f
+            mixed[i+4] = (l[i] - l[i+4]) * 0.5f
+            mixed[i] += (r[i] + r[i+4]) * 0.25f
+            mixed[i+4] += (r[i] - r[i+4]) * 0.25f
+        }
+
+        // Write with HF damping in feedback path
+        val fb = 0.7f * (1.0f - 0.15f)  // feedback with HF damping
+        for (c in 0..1) {
+            val lines_c = lines[c]
+            for (i in 0 until delays.size) {
+                val input = if (c == 0) left else right
+                val delayed = lines_c[i][positions[i]]
+                lines_c[i][positions[i]] = input + mixed[i] * feedback * (1.0f - 0.15f)  // HF damping in feedback
+                positions[i] = (positions[i] + 1) % delays[i]
+            }
+        }
+
+        // Sum all delayed signals for wet signal
+        var wetLeft = 0.0f
+        var wetRight = 0.0f
+        for (i in 0 until delays.size) {
+            wetLeft += lines[0][i][positions[i]]
+            wetRight += lines[1][i][positions[i]]
+        }
+        wetLeft *= 0.125f
+        wetRight *= 0.125f
+
+        // Dry signal at 100%, wet mixed in at 'amount'
+        output[0] = left + wetLeft * amount
+        output[1] = right + wetRight * amount
     }
 }

@@ -81,7 +81,7 @@ fun InputSetupDialog(
                     }
                 }
                 Spacer(Modifier.height(10.dp))
-                Text("LIVE INPUT TEST", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
+                Text("LIVE INPUT LEVELS", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
                 InputMeter("L / Input 1", levels.left)
                 InputMeter("R / Input 2", levels.right)
                 if (levels.channelPeaks.size > 2) {
@@ -95,7 +95,7 @@ fun InputSetupDialog(
                     }
                     Switch(monitorInput, onMonitorInputChanged)
                 }
-                Text(if (routedDevice.isBlank()) "Route not tested yet" else "Android route: $routedDevice", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (routedDevice.isBlank()) "No route detected" else "Android route: $routedDevice", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (diagnostics.isNotBlank()) Text(diagnostics, style = MaterialTheme.typography.labelSmall, color = if (diagnostics.contains("digital silence")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                 if (statusMessage.isNotBlank()) Text(statusMessage, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
                 Spacer(Modifier.height(8.dp))
