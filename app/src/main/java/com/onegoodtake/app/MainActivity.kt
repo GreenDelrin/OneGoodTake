@@ -417,27 +417,28 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
         }
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(isMonitoring) {
         // The wizard shows the same live strip the record screen does, so it needs the peaks.
-        while (true) {
-            if (wizardOpen && isMonitoring) {
+        if (!isMonitoring) {
+            wizardPeaks = emptyList()
+            return@LaunchedEffect
+        }
+        while (isMonitoring) {
+            if (wizardOpen) {
                 wizardPeaks = capture.livePeaks()
             } else {
                 wizardPeaks = emptyList()
             }
             kotlinx.coroutines.delay(80)
         }
+        wizardPeaks = emptyList()
     }
 
     LaunchedEffect(isMixPreviewPlaying) {
         while (isMixPreviewPlaying) {
             mixPreviewPositionMs = mixPreview.positionMs
             mixPreviewDurationMs = mixPreview.durationMs
-            // Estimate master peak from track volumes (rough approximation)
-            val peakEstimate = project.tracks.fold(0f) { acc, track ->
-                acc + (if (!track.muted) 10.0.pow(track.volumeDb / 20.0).toFloat() else 0f)
-            }.coerceIn(0f, 1f)
-            masterPeakLevel = peakEstimate
+            masterPeakLevel = mixPreview.peakLevel
             val videoDuration = mixVideoController.durationMs()
             val videoEnd = project.trimEndMs.takeIf { it > 0L } ?: videoDuration
             if (videoEnd > 0L && mixVideoController.positionMs() >= videoEnd && mixPreview.isPlaying) {

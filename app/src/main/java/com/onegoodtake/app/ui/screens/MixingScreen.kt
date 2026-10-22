@@ -98,7 +98,7 @@ fun MixingScreen(
                 .fillMaxWidth()
                 .height(28.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(if (masterPeakLevel >= 0.99f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.surfaceVariant)
+                .background(MaterialTheme.colorScheme.surfaceVariant)
                 .padding(horizontal = 14.dp, vertical = 6.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -107,13 +107,13 @@ fun MixingScreen(
                 LinearProgressIndicator(
                     progress = { masterPeakLevel.coerceIn(0f, 1f) },
                     modifier = Modifier.weight(1f).height(8.dp),
-                    color = if (masterPeakLevel >= 0.99f) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.primary
+                    color = if (masterPeakLevel >= 0.99f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
                     if (masterPeakLevel >= 0.99f) "CLIP" else "${(20 * Math.log10(masterPeakLevel.coerceAtLeast(0.00001f).toDouble())).toInt()} dBFS",
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (masterPeakLevel >= 0.99f) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSurfaceVariant
+                    color = if (masterPeakLevel >= 0.99f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -259,11 +259,10 @@ private fun TrackEffectsSheet(track: Track, onTrackChange: (Track) -> Unit, modi
         Text(track.name, style = MaterialTheme.typography.titleLarge)
         Text("Changes are heard in Live Audio.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         SliderRow("PAN", if (pan < -0.05f) "L" else if (pan > 0.05f) "R" else "C", pan, -1f..1f, { pan = it; update() })
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            EffectSlider("LOW", low, { low = it; update() }, Modifier.weight(1f))
-            EffectSlider("MID", mid, { mid = it; update() }, Modifier.weight(1f))
-            EffectSlider("HIGH", high, { high = it; update() }, Modifier.weight(1f))
-        }
+        // EQ sliders stacked vertically, full width
+        SliderRow("LOW", "${low.toInt()} dB", low, -12f..12f, { low = it; update() })
+        SliderRow("MID", "${mid.toInt()} dB", mid, -12f..12f, { mid = it; update() })
+        SliderRow("HIGH", "${high.toInt()} dB", high, -12f..12f, { high = it; update() })
         SliderRow("COMP", "${(compressor * 100).toInt()}%", compressor, 0f..1f, { compressor = it; update() })
         SliderRow("REVERB", "${(reverb * 100).toInt()}%", reverb, 0f..1f, { reverb = it; update() })
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -279,14 +278,6 @@ private fun SliderRow(label: String, valueLabel: String, value: Float, range: Cl
         Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(62.dp))
         Slider(value, onChange, Modifier.weight(1f).height(32.dp), valueRange = range)
         Text(valueLabel, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(42.dp), maxLines = 1)
-    }
-}
-
-@Composable
-private fun EffectSlider(label: String, value: Float, onValueChange: (Float) -> Unit, modifier: Modifier = Modifier) {
-    Column(modifier.padding(horizontal = 2.dp)) {
-        Text("$label ${value.toInt()}dB", style = MaterialTheme.typography.labelSmall, maxLines = 1)
-        Slider(value, onValueChange, Modifier.height(32.dp).fillMaxWidth(), valueRange = -12f..12f)
     }
 }
 

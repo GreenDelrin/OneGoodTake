@@ -37,9 +37,11 @@ internal class RealtimeMixCore(
     private var timelineFrame = 0L
     private var masterGain = 1f
     private val discardFrame = ShortArray(2)
+    @Volatile private var currentPeakLevel = 0f
 
     val positionMs: Long get() = positionFrames * 1000L / SAMPLE_RATE
     val durationMs: Long get() = durationFrames * 1000L / SAMPLE_RATE
+    val peakLevel: Float get() = currentPeakLevel
 
     init {
         require(this.sources.map { it.id }.toSet().size == this.sources.size) { "Track IDs must be unique" }
@@ -65,10 +67,14 @@ internal class RealtimeMixCore(
         }
         val frames = min(maxFrames.toLong(), (durationFrames - positionFrames).coerceAtLeast(0L)).toInt()
         if (frames == 0) return 0
+        var framePeak = 0f
         for (frame in 0 until frames) {
             processFrame(snapshot, soloActive, output, frame * 2)
+            val p = max(abs(output[frame * 2].toFloat()), abs(output[frame * 2 + 1].toFloat())) / 32768f
+            if (p > framePeak) framePeak = p
             timelineFrame++
         }
+        currentPeakLevel = framePeak
         positionFrames += frames
         return frames
     }

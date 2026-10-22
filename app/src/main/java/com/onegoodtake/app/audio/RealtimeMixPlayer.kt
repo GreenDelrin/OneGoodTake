@@ -33,6 +33,8 @@ class RealtimeMixPlayer(context: Context) {
         private set
     @Volatile var durationMs = 0L
         private set
+    @Volatile var peakLevel = 0f
+        private set
 
 fun warmUp() {
         if (warmedUp) return
@@ -137,6 +139,7 @@ fun warmUp() {
                         main.post { if (generation == runId) onRoute("Mix out: ${OutputRouter.describe(ready)}") }
                     }
                     positionMs = engine.positionMs
+                    peakLevel = engine.peakLevel
                 }
                 if (positionMs < durationMs && !running) positionMs = engine.positionMs
                 if (running && generation == runId) positionMs = durationMs
