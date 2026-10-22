@@ -4,12 +4,12 @@ plugins {
 }
 
 android {
-    namespace = "com.socialmaster.app"
+    namespace = "com.onegoodtake.app"
     compileSdk = 34
     ndkVersion = "28.2.13676358"
 
     defaultConfig {
-        applicationId = "com.socialmaster.app"
+        applicationId = "com.onegoodtake.app"
         minSdk = 29
         targetSdk = 34
 versionCode = 7

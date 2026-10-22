@@ -1,6 +1,6 @@
-# SocialMasterApp
+# One Good Take
 
-Android (API 29+) app for musicians: record a social-media video with proper multitrack audio
+Android (API 29+) app for musicians: record one good take of yourself playing, straight to a social-media video with proper multitrack audio
 (backing track + external audio interface), mix (gain/EQ/reverb per track), and one-button
 auto-master for social-media loudness (-14 LUFS). Kotlin + Jetpack Compose + CameraX.
 
@@ -29,3 +29,4 @@ JAVA_HOME="C:/Program Files/Eclipse Adoptium/jdk-17.0.18.8-hotspot" ./gradlew as
 ## Next steps
 1. Refine mastering-stage controls and overall visual consistency.
 2. Improve export quality and trim precision.
+

@@ -10,7 +10,7 @@ static std::mutex g_cap_mutex;
 
 extern "C" {
 
-JNIEXPORT jstring JNICALL Java_com_socialmaster_app_audio_NativeUsb_start(
+JNIEXPORT jstring JNICALL Java_com_onegoodtake_app_audio_NativeUsb_start(
         JNIEnv* env, jobject, jint fd, jbyteArray desc, jint rate) {
     std::lock_guard<std::mutex> lock(g_cap_mutex);
     g_cap = std::make_unique<uac::Capture>();
@@ -21,7 +21,7 @@ JNIEXPORT jstring JNICALL Java_com_socialmaster_app_audio_NativeUsb_start(
     return env->NewStringUTF(r.c_str());
 }
 
-JNIEXPORT jint JNICALL Java_com_socialmaster_app_audio_NativeUsb_captureInterface(
+JNIEXPORT jint JNICALL Java_com_onegoodtake_app_audio_NativeUsb_captureInterface(
         JNIEnv* env, jobject, jbyteArray desc) {
     jsize n = env->GetArrayLength(desc);
     jbyte* d = env->GetByteArrayElements(desc, nullptr);
@@ -30,17 +30,17 @@ JNIEXPORT jint JNICALL Java_com_socialmaster_app_audio_NativeUsb_captureInterfac
     return iface;
 }
 
-JNIEXPORT void JNICALL Java_com_socialmaster_app_audio_NativeUsb_stop(JNIEnv*, jobject) {
+JNIEXPORT void JNICALL Java_com_onegoodtake_app_audio_NativeUsb_stop(JNIEnv*, jobject) {
     std::lock_guard<std::mutex> lock(g_cap_mutex);
     g_cap.reset();
 }
 
-JNIEXPORT jint JNICALL Java_com_socialmaster_app_audio_NativeUsb_channels(JNIEnv*, jobject) {
+JNIEXPORT jint JNICALL Java_com_onegoodtake_app_audio_NativeUsb_channels(JNIEnv*, jobject) {
     std::lock_guard<std::mutex> lock(g_cap_mutex);
     return g_cap ? g_cap->channels() : 0;
 }
 
-JNIEXPORT jint JNICALL Java_com_socialmaster_app_audio_NativeUsb_read(
+JNIEXPORT jint JNICALL Java_com_onegoodtake_app_audio_NativeUsb_read(
         JNIEnv* env, jobject, jfloatArray buf, jint maxFrames) {
     std::lock_guard<std::mutex> lock(g_cap_mutex);
     if (!g_cap) return 0;
@@ -50,7 +50,7 @@ JNIEXPORT jint JNICALL Java_com_socialmaster_app_audio_NativeUsb_read(
     return n;
 }
 
-JNIEXPORT void JNICALL Java_com_socialmaster_app_audio_NativeUsb_peaks(
+JNIEXPORT void JNICALL Java_com_onegoodtake_app_audio_NativeUsb_peaks(
         JNIEnv* env, jobject, jfloatArray out) {
     std::lock_guard<std::mutex> lock(g_cap_mutex);
     if (!g_cap) return;
@@ -60,7 +60,7 @@ JNIEXPORT void JNICALL Java_com_socialmaster_app_audio_NativeUsb_peaks(
     env->ReleaseFloatArrayElements(out, b, 0);
 }
 
-JNIEXPORT jlongArray JNICALL Java_com_socialmaster_app_audio_NativeUsb_stats(JNIEnv* env, jobject) {
+JNIEXPORT jlongArray JNICALL Java_com_onegoodtake_app_audio_NativeUsb_stats(JNIEnv* env, jobject) {
     std::lock_guard<std::mutex> lock(g_cap_mutex);
     long long s[3] = {0, 0, 0};
     if (g_cap) g_cap->stats(s);
