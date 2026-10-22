@@ -22,20 +22,27 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.content.ContextCompat
@@ -162,6 +169,9 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
     var isLoadingBacking by remember { mutableStateOf(false) }
     var loadProgress by remember { mutableFloatStateOf(0f) }
     var isExporting by remember { mutableStateOf(false) }
+    var exportProgress by remember { mutableFloatStateOf(0f) }
+    var exportStage by remember { mutableStateOf("") }
+    var exportCompleteMessage by remember { mutableStateOf("") }
     var isMixPreviewPlaying by remember { mutableStateOf(false) }
     var isMixPreviewPreparing by remember { mutableStateOf(false) }
     var mixPreviewPositionMs by remember { mutableLongStateOf(0L) }
@@ -417,18 +427,14 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
         }
     }
 
-    LaunchedEffect(isMonitoring) {
+    LaunchedEffect(wizardOpen, isMonitoring) {
         // The wizard shows the same live strip the record screen does, so it needs the peaks.
-        if (!isMonitoring) {
+        if (!isMonitoring || !wizardOpen) {
             wizardPeaks = emptyList()
             return@LaunchedEffect
         }
-        while (isMonitoring) {
-            if (wizardOpen) {
-                wizardPeaks = capture.livePeaks()
-            } else {
-                wizardPeaks = emptyList()
-            }
+        while (isMonitoring && wizardOpen) {
+            wizardPeaks = capture.livePeaks()
             kotlinx.coroutines.delay(80)
         }
         wizardPeaks = emptyList()
@@ -575,7 +581,12 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
 
     fun wizardNext() {
         if (wizardStep < WizardStep.LAST) {
-            wizardStep++
+            val nextStep = wizardStep + 1
+            // Clear input test status when leaving the INPUT step
+            if (wizardStep == WizardStep.INPUT && nextStep != WizardStep.INPUT) {
+                status = ""
+            }
+            wizardStep = nextStep
         } else {
             wizardOpen = false
             wizardDone = true
@@ -756,6 +767,9 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
             isMixPreviewPlaying = false; isMixPreviewPreparing = false
         }
         isExporting = true
+        exportProgress = 0f
+        exportStage = "Rendering mix…"
+        exportCompleteMessage = ""
         val tracks = project.tracks.map { it.copy() }
         val trimStart = project.trimStartMs
         val trimEnd = project.trimEndMs.takeIf { it > 0L } ?: videoDurationMs
@@ -766,28 +780,48 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
         val mixOutput = File(outputDir, "export_mix_$jobId.wav")
         val masterOutput = File(outputDir, "export_master_$jobId.wav")
         val videoOutput = File(outputDir, "OneGoodTake_$jobId.mp4")
-        status = "Rendering mix…"
         scope.launch {
             try {
+                exportStage = "Rendering mix…"
+                exportProgress = 0.1f
                 val mixLufs = withContext(Dispatchers.IO) { Mixer.mix(tracks, mixOutput, trimStart, trimEnd) }
                 if (mixLufs <= -70f) throw IllegalStateException("The mix is silent. Check the track levels and files.")
-                status = "Mastering to ${targetLufs.toInt()} LUFS…"
+                
+                exportStage = "Mastering to ${targetLufs.toInt()} LUFS…"
+                exportProgress = 0.4f
                 val finalLufs = withContext(Dispatchers.IO) { Mastering.auto(masteringProject, mixOutput, masterOutput) }
-                status = "Exporting video…"
+                
+                exportStage = "Exporting video…"
+                exportProgress = 0.7f
                 val muxed = withContext(Dispatchers.IO) {
                     Exporter.export(video, masterOutput, videoOutput, syncOffset, trimStart, trimEnd, camera.rotationHint)
                 }
                 if (!muxed) throw IllegalStateException("Could not combine the video and mastered audio")
-                status = "Saving to Gallery…"
+                
+                exportStage = "Saving to Gallery…"
+                exportProgress = 0.9f
                 withContext(Dispatchers.IO) { saveVideoToGallery(activity, videoOutput) }
+                
+                exportStage = "Done"
+                exportProgress = 1f
+                exportCompleteMessage = "Video rendered. Available in gallery."
+                
                 project.master.makeupGainDb = masteringProject.master.makeupGainDb
                 measuredLufs = finalLufs
                 trackVersion++
-                status = "Export saved to Movies/OneGoodTake"
+                
+                // Show completion message for 3 seconds
+                kotlinx.coroutines.delay(3000)
+                exportCompleteMessage = ""
             } catch (e: Exception) {
-                status = "Export failed: ${e.message ?: "audio/video processing error"}"
+                exportStage = "Failed"
+                exportCompleteMessage = "Export failed: ${e.message ?: "audio/video processing error"}"
+                kotlinx.coroutines.delay(3000)
+                exportCompleteMessage = ""
             } finally {
                 isExporting = false
+                exportProgress = 0f
+                exportStage = ""
                 mixOutput.delete(); masterOutput.delete(); videoOutput.delete()
             }
         }
@@ -891,6 +925,14 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
                 )
             }
         }
+    }
+
+    if (isExporting) {
+        ExportProgressOverlay(
+            progress = exportProgress,
+            stage = exportStage,
+            completeMessage = exportCompleteMessage
+        )
     }
 
     if (settingsOpen) {
@@ -1025,6 +1067,64 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
             },
             onDismiss = { backingLibraryOpen = false }
         )
+    }
+}
+
+@Composable
+private fun ExportProgressOverlay(
+    progress: Float,
+    stage: String,
+    completeMessage: String
+) {
+    Box(
+        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth(0.8f)
+                .clip(RoundedCornerShape(16.dp))
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(24.dp)
+        ) {
+            if (completeMessage.isNotBlank()) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        Icons.Filled.CheckCircle,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        completeMessage,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            } else {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(
+                        progress = { progress.coerceIn(0f, 1f) },
+                        modifier = Modifier.size(56.dp),
+                        strokeWidth = 6.dp
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        stage,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    LinearProgressIndicator(
+                        progress = { progress.coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth().height(6.dp)
+                    )
+                }
+            }
+        }
     }
 }
 
