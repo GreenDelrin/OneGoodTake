@@ -38,35 +38,7 @@ class AudioCapture(private val context: Context) {
     fun warmUp() {
         if (warmedUp) return
         warmedUp = true
-        try {
-            val sampleRate = 44100
-            val channelMask = AudioFormat.CHANNEL_OUT_STEREO
-            val bufferSize = AudioTrack.getMinBufferSize(sampleRate, channelMask, AudioFormat.ENCODING_PCM_16BIT)
-            if (bufferSize <= 0) return
-            val track = AudioTrack.Builder()
-                .setAudioAttributes(AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build())
-                .setAudioFormat(AudioFormat.Builder()
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setSampleRate(sampleRate)
-                    .setChannelMask(channelMask)
-                    .build())
-                .setBufferSizeInBytes(bufferSize)
-                .setTransferMode(AudioTrack.MODE_STREAM)
-                .build()
-            if (track.state == AudioTrack.STATE_INITIALIZED) {
-                track.play()
-                val silence = ShortArray(sampleRate / 10) // 100ms of silence
-                track.write(silence, 0, silence.size)
-                Thread.sleep(50)
-                track.stop()
-                track.release()
-            }
-        } catch (_: Exception) {
-            // Ignore warmup failures
-        }
+        AudioWarmUp.warm(context)
     }
 
     fun livePeaks(): List<Float> = synchronized(peaks) { peaks.toList() }
@@ -143,6 +115,10 @@ class AudioCapture(private val context: Context) {
     ): Boolean {
         stop()
         synchronized(peaks) { peaks.clear() }
+        // Some interfaces keep their output asleep until real samples arrive through the
+        // device the app plays to, and the monitoring stays silent until something else
+        // plays. Warm it before the capture starts so the user hears themselves at once.
+        if (AudioWarmUp.outputIsUsb(context)) AudioWarmUp.warm(context)
         if (sourceProfile == InputSourceProfile.USB_DIRECT) {
             var directError = "UAC2 direct capture could not start."
             if (startUsbCapture(output, deviceId, mode, onLevels, onRoute, { directError = it }, onDiagnostics, onOutput, monitorInput)) return true

@@ -188,6 +188,7 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
     var wizardStep by remember { mutableStateOf(restored["wizard.step"]?.toIntOrNull() ?: WizardStep.WELCOME) }
     var wizardDone by remember { mutableStateOf(restored["wizard.done"]?.toBooleanStrictOrNull() == true) }
     var wizardOpen by remember { mutableStateOf(!wizardDone) }
+    var wizardPeaks by remember { mutableStateOf<List<Float>>(emptyList()) }
     var status by remember { mutableStateOf("") }
     var livePeaks by remember { mutableStateOf<List<Float>>(emptyList()) }
     var backingPeaks by remember { mutableStateOf<List<Float>>(emptyList()) }
@@ -379,6 +380,15 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
             isMixPreviewPlaying = false
             isMixPreviewPreparing = false
         }
+    }
+
+    LaunchedEffect(wizardOpen, isMonitoring) {
+        // The wizard shows the same live strip the record screen does, so it needs the peaks.
+        while (wizardOpen && isMonitoring) {
+            wizardPeaks = capture.livePeaks()
+            kotlinx.coroutines.delay(80)
+        }
+        if (!isMonitoring) wizardPeaks = emptyList()
     }
 
     LaunchedEffect(isMixPreviewPlaying) {
@@ -906,8 +916,12 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
             isTesting = isMonitoring,
             onToggleTest = ::startInputTest,
             levels = levels,
+            livePeaks = wizardPeaks,
             routeInfo = routeInfo,
             outputRoute = outputRoute,
+            cameras = camera.cameras,
+            cameraIndex = camera.cameraIndex,
+            onCameraSelected = { index -> camera.selectCamera(index) },
             backingName = backingDisplayName,
             onLoadBacking = { backingLibraryOpen = true },
             onBack = { wizardStep = (wizardStep - 1).coerceAtLeast(WizardStep.WELCOME) },

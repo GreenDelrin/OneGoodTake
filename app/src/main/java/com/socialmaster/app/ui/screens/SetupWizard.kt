@@ -27,6 +27,8 @@ import androidx.compose.ui.window.DialogProperties
 import com.socialmaster.app.audio.InputChannelMode
 import com.socialmaster.app.audio.InputLevels
 import com.socialmaster.app.audio.InputSourceProfile
+import com.socialmaster.app.camera.CameraOption
+import com.socialmaster.app.ui.Waveform
 import com.socialmaster.app.ui.components.AppButton
 import com.socialmaster.app.ui.components.SectionLabel
 
@@ -37,10 +39,11 @@ import com.socialmaster.app.ui.components.SectionLabel
 object WizardStep {
     const val WELCOME = 0
     const val PERMISSIONS = 1
-    const val INPUT = 2
-    const val SOUND = 3
-    const val PLAYALONG = 4
-    const val READY = 5
+    const val CAMERA = 2
+    const val INPUT = 3
+    const val SOUND = 4
+    const val PLAYALONG = 5
+    const val READY = 6
     const val LAST = READY
 }
 
@@ -61,8 +64,12 @@ fun SetupWizard(
     isTesting: Boolean,
     onToggleTest: () -> Unit,
     levels: InputLevels,
+    livePeaks: List<Float>,
     routeInfo: String,
     outputRoute: String,
+    cameras: List<CameraOption>,
+    cameraIndex: Int,
+    onCameraSelected: (Int) -> Unit,
     backingName: String?,
     onLoadBacking: () -> Unit,
     onBack: () -> Unit,
@@ -82,13 +89,14 @@ fun SetupWizard(
                     when (step) {
                         WizardStep.WELCOME -> WelcomeStep()
                         WizardStep.PERMISSIONS -> PermissionsStep(hasPermissions, onRequestPermissions)
+                        WizardStep.CAMERA -> CameraStep(cameras, cameraIndex, onCameraSelected)
                         WizardStep.INPUT -> InputStep(
                             devices, selectedDeviceId, onDeviceSelected, mode, onModeSelected,
-                            sourceProfile, onSourceProfileSelected, isTesting, onToggleTest, levels, routeInfo
+                            sourceProfile, onSourceProfileSelected, isTesting, onToggleTest, levels, livePeaks, routeInfo
                         )
                         WizardStep.SOUND -> SoundStep(monitorInput, onMonitorInputChanged, outputRoute)
                         WizardStep.PLAYALONG -> PlayAlongStep(backingName, onLoadBacking)
-                        WizardStep.READY -> ReadyStep(hasPermissions, devices, selectedDeviceId, monitorInput, backingName)
+                        WizardStep.READY -> ReadyStep(hasPermissions, devices, selectedDeviceId, monitorInput, cameras, cameraIndex, backingName)
                     }
                 }
                 Spacer(Modifier.height(14.dp))
@@ -157,6 +165,32 @@ private fun PermissionsStep(hasPermissions: Boolean, onRequestPermissions: () ->
 }
 
 @Composable
+private fun CameraStep(cameras: List<CameraOption>, cameraIndex: Int, onCameraSelected: (Int) -> Unit) {
+    WizardTitle("Which camera?", "Pick the lens you film with. You can change it any time with the camera button.")
+    Spacer(Modifier.height(14.dp))
+    if (cameras.isEmpty()) {
+        Text(
+            "No camera was found on this device.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+    cameras.forEachIndexed { index, camera ->
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            RadioButton(cameraIndex == index, onClick = { onCameraSelected(index) })
+            Column(Modifier.weight(1f)) {
+                Text(camera.label)
+                Text(
+                    if (camera.isFront) "Selfie camera" else "Main camera",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun InputStep(
     devices: List<AudioDeviceInfo>,
     selectedDeviceId: Int?,
@@ -168,6 +202,7 @@ private fun InputStep(
     isTesting: Boolean,
     onToggleTest: () -> Unit,
     levels: InputLevels,
+    livePeaks: List<Float>,
     routeInfo: String
 ) {
     WizardTitle("Pick your input", "If you plugged in an interface, choose it here so the app records from it.")
@@ -213,15 +248,44 @@ private fun InputStep(
         AppButton(if (isTesting) "Stop test" else "Test this input", onToggleTest)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            if (levels.left > 0.01f || levels.right > 0.01f) {
-                Text("Signal is coming in", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-            } else if (isTesting) {
+            if (isTesting) {
                 Text("Play something and watch the meter", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (routeInfo.isNotBlank()) {
                 Text(routeInfo, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
+    }
+    Spacer(Modifier.height(10.dp))
+    // The same live strip the record screen shows, so the test looks like the real thing.
+    Box(
+        Modifier.fillMaxWidth().height(44.dp).clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        if (livePeaks.isEmpty()) {
+            Text(
+                if (isTesting) "Listening…" else "Press the test button to see the signal",
+                Modifier.padding(start = 10.dp).align(Alignment.CenterStart),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            Waveform(livePeaks, MaterialTheme.colorScheme.primary, Modifier.fillMaxSize())
+        }
+    }
+    Spacer(Modifier.height(6.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("L", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(18.dp))
+        LinearProgressIndicator(
+            progress = { levels.left.coerceIn(0f, 1f) },
+            modifier = Modifier.weight(1f).height(6.dp)
+        )
+        Spacer(Modifier.width(10.dp))
+        Text("R", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(18.dp))
+        LinearProgressIndicator(
+            progress = { levels.right.coerceIn(0f, 1f) },
+            modifier = Modifier.weight(1f).height(6.dp)
+        )
     }
 }
 
@@ -269,11 +333,14 @@ private fun ReadyStep(
     devices: List<AudioDeviceInfo>,
     selectedDeviceId: Int?,
     monitorInput: Boolean,
+    cameras: List<CameraOption>,
+    cameraIndex: Int,
     backingName: String?
 ) {
     WizardTitle("You are ready", "Everything is set. The record button is on the next screen.")
     Spacer(Modifier.height(16.dp))
     ReadyLine("Camera and microphone", if (hasPermissions) "Allowed" else "Not allowed")
+    ReadyLine("Camera", cameras.getOrNull(cameraIndex)?.label ?: "Front")
     ReadyLine(
         "Input",
         devices.firstOrNull { it.id == selectedDeviceId }?.productName?.toString() ?: "Phone microphone"

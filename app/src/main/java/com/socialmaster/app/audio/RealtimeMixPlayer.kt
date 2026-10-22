@@ -37,35 +37,7 @@ class RealtimeMixPlayer(context: Context) {
 fun warmUp() {
         if (warmedUp) return
         warmedUp = true
-        try {
-            val sampleRate = RealtimeMixCore.SAMPLE_RATE
-            val channelMask = AudioFormat.CHANNEL_OUT_STEREO
-            val bufferSize = AudioTrack.getMinBufferSize(sampleRate, channelMask, AudioFormat.ENCODING_PCM_16BIT)
-            if (bufferSize <= 0) return
-            val track = AudioTrack.Builder()
-                .setAudioAttributes(AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build())
-                .setAudioFormat(AudioFormat.Builder()
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setSampleRate(sampleRate)
-                    .setChannelMask(channelMask)
-                    .build())
-                .setBufferSizeInBytes(bufferSize)
-                .setTransferMode(AudioTrack.MODE_STREAM)
-                .build()
-            if (track.state == AudioTrack.STATE_INITIALIZED) {
-                track.play()
-                val silence = ShortArray(sampleRate / 10) // 100ms of silence
-                track.write(silence, 0, silence.size)
-                Thread.sleep(50)
-                track.stop()
-                track.release()
-            }
-        } catch (_: Exception) {
-            // Ignore warmup failures
-        }
+        AudioWarmUp.warm(appContext)
     }
 
     @Synchronized
@@ -86,6 +58,8 @@ fun warmUp() {
             var error: String? = null
             try {
                 Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
+                // The preview goes out through the interface too, so it needs the same warm-up.
+                if (AudioWarmUp.outputIsUsb(appContext)) AudioWarmUp.warm(appContext)
                 for (track in latestTracks.get()) {
                     val file = fileFromUri(track.sourceUri) ?: throw IllegalArgumentException("${track.name} is not a local audio file")
                     sources += RealtimeWavSource(track.id, file, track.sourceOffsetMs + trimStartMs)

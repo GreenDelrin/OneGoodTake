@@ -52,6 +52,11 @@ class RecordingController(private val context: Context) {
     /** Reports the label of the camera in use so the UI can show it. */
     var onCameraChanged: ((String) -> Unit)? = null
 
+    init {
+        // The setup wizard needs the camera list before the preview is bound.
+        cameras = listCameras()
+    }
+
     /** Rotation the exported video needs so the picture is upright. */
     var rotationHint: Int = 90
         private set
@@ -60,7 +65,7 @@ class RecordingController(private val context: Context) {
     fun bind(owner: androidx.lifecycle.LifecycleOwner, view: PreviewView) {
         lifecycleOwner = owner
         previewView = view
-        cameras = listCameras()
+        if (cameras.isEmpty()) cameras = listCameras()
         val future = ProcessCameraProvider.getInstance(context)
         future.addListener({
             provider = future.get()

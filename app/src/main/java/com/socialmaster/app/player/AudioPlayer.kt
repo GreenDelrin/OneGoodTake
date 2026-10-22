@@ -26,36 +26,7 @@ class AudioPlayer(private val context: Context) {
     fun warmUp() {
         if (warmedUp) return
         warmedUp = true
-        try {
-            val sampleRate = 44100
-            val channelMask = AudioFormat.CHANNEL_OUT_STEREO
-            val bufferSize = AudioTrack.getMinBufferSize(sampleRate, channelMask, AudioFormat.ENCODING_PCM_16BIT)
-            if (bufferSize <= 0) return
-            val track = AudioTrack.Builder()
-                .setAudioAttributes(AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build())
-                .setAudioFormat(AudioFormat.Builder()
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setSampleRate(sampleRate)
-                    .setChannelMask(channelMask)
-                    .build())
-                .setBufferSizeInBytes(bufferSize)
-                .setTransferMode(AudioTrack.MODE_STREAM)
-                .build()
-            if (track.state == AudioTrack.STATE_INITIALIZED) {
-                track.play()
-                // Play a very short silent clip to warm up the audio system
-                val silence = ShortArray(sampleRate / 10) // 100ms of silence
-                track.write(silence, 0, silence.size)
-                Thread.sleep(50)
-                track.stop()
-                track.release()
-            }
-        } catch (_: Exception) {
-            // Ignore warmup failures
-        }
+        com.socialmaster.app.audio.AudioWarmUp.warm(context)
     }
 
     /** Play a local file from a timeline position. */
