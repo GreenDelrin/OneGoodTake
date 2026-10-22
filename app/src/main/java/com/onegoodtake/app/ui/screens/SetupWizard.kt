@@ -364,7 +364,9 @@ private fun PlayAlongStep(backingName: String?, onLoadBacking: () -> Unit) {
         "The track plays in your headphones and starts with your recording."
     )
     Spacer(Modifier.height(16.dp))
-    AppButton("Choose a backing track", onLoadBacking, modifier = Modifier.fillMaxWidth())
+    AppButton("Load the demo track", onLoadBacking, modifier = Modifier.fillMaxWidth())
+    Spacer(Modifier.height(8.dp))
+    AppButton("Choose a backing track from your phone", onLoadBacking, modifier = Modifier.fillMaxWidth(), containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurface)
 }
 
 @Composable

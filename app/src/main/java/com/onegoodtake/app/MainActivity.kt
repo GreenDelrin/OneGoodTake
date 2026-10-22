@@ -43,6 +43,7 @@ import androidx.core.view.WindowInsetsCompat
 import com.onegoodtake.app.audio.AudioCapture
 import com.onegoodtake.app.audio.AudioDecoder
 import com.onegoodtake.app.audio.BackingLibraryEntry
+import com.onegoodtake.app.audio.BundledDemo
 import com.onegoodtake.app.audio.Exporter
 import com.onegoodtake.app.audio.InputChannelMode
 import com.onegoodtake.app.audio.InputLevels
@@ -325,14 +326,30 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
         }
     }
     LaunchedEffect(Unit) {
-        val file = backingTrack ?: return@LaunchedEffect
+        // On a fresh install there is no backing track yet. Decode the bundled
+        // demo once so a new user can play along immediately.
+        val file = backingTrack ?: withContext(Dispatchers.IO) {
+            val demo = BundledDemo.ensureWav(activity)
+            if (demo != null && demo.isFile) {
+                // Add it to the library as a favourite so it is easy to find again.
+                if (backingLibrary.none { it.path == demo.absolutePath }) {
+                    backingLibrary = listOf(BackingLibraryEntry(demo.absolutePath, "Demo backing track", true, System.currentTimeMillis())) + backingLibrary
+                }
+            }
+            demo
+        }
+        if (file == null || !file.isFile) return@LaunchedEffect
         val duration = withContext(Dispatchers.IO) { WavIO.durationMs(file) }
         val peaks = withContext(Dispatchers.IO) { WavIO.peaks(file, 500) }
         if (duration == null || peaks == null || duration <= 0L) {
-            backingTrack = null
-            backingDisplayName = ""
-            backingPositionMs = 0L
+            if (backingTrack == file) {
+                backingTrack = null
+                backingDisplayName = ""
+                backingPositionMs = 0L
+            }
         } else {
+            if (backingTrack == null) backingTrack = file
+            if (backingDisplayName.isBlank()) backingDisplayName = "Demo backing track"
             backingPeaks = peaks
             backingDurationMs = duration
             backingPositionMs = backingPositionMs.coerceAtMost(backingDurationMs)
