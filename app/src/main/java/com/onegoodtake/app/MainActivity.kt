@@ -77,6 +77,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.math.pow
 import java.io.File
 
 class MainActivity : ComponentActivity() {
@@ -232,6 +233,9 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
     }
     var trackVersion by remember { mutableIntStateOf(0) }
     var videoFinalize by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
+    var recordingElapsedMs by remember { mutableLongStateOf(0L) }
+    var recordingStartMs by remember { mutableLongStateOf(0L) }
+    var masterPeakLevel by remember { mutableFloatStateOf(0f) }
 
     fun saveWorkspace() {
         val snapshot = linkedMapOf<String, String>()
@@ -413,19 +417,27 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
         }
     }
 
-    LaunchedEffect(wizardOpen, isMonitoring) {
+    LaunchedEffect(Unit) {
         // The wizard shows the same live strip the record screen does, so it needs the peaks.
-        while (wizardOpen && isMonitoring) {
-            wizardPeaks = capture.livePeaks()
+        while (true) {
+            if (wizardOpen && isMonitoring) {
+                wizardPeaks = capture.livePeaks()
+            } else {
+                wizardPeaks = emptyList()
+            }
             kotlinx.coroutines.delay(80)
         }
-        if (!isMonitoring) wizardPeaks = emptyList()
     }
 
     LaunchedEffect(isMixPreviewPlaying) {
         while (isMixPreviewPlaying) {
             mixPreviewPositionMs = mixPreview.positionMs
             mixPreviewDurationMs = mixPreview.durationMs
+            // Estimate master peak from track volumes (rough approximation)
+            val peakEstimate = project.tracks.fold(0f) { acc, track ->
+                acc + (if (!track.muted) 10.0.pow(track.volumeDb / 20.0).toFloat() else 0f)
+            }.coerceIn(0f, 1f)
+            masterPeakLevel = peakEstimate
             val videoDuration = mixVideoController.durationMs()
             val videoEnd = project.trimEndMs.takeIf { it > 0L } ?: videoDuration
             if (videoEnd > 0L && mixVideoController.positionMs() >= videoEnd && mixPreview.isPlaying) {
@@ -435,6 +447,7 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
             }
             kotlinx.coroutines.delay(80)
         }
+        masterPeakLevel = 0f
     }
 
     DisposableEffect(keepScreenOn) {
@@ -458,6 +471,17 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
             livePeaks = capture.livePeaks()
             kotlinx.coroutines.delay(60)
         }
+    }
+    LaunchedEffect(isRecording) {
+        if (isRecording) {
+            recordingStartMs = System.currentTimeMillis()
+            recordingElapsedMs = 0L
+        }
+        while (isRecording) {
+            recordingElapsedMs = System.currentTimeMillis() - recordingStartMs
+            kotlinx.coroutines.delay(100)
+        }
+        if (!isRecording) recordingElapsedMs = 0L
     }
     LaunchedEffect(backingTrack, backingPlaying) {
         while (backingPlaying) {
@@ -554,6 +578,7 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
         } else {
             wizardOpen = false
             wizardDone = true
+            if (isMonitoring) { isMonitoring = false; scope.launch(Dispatchers.IO) { capture.stop() } }
             if (!hasPermissions) requestPermissions()
         }
     }
@@ -561,6 +586,7 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
     fun wizardSkip() {
         wizardOpen = false
         wizardDone = true
+        if (isMonitoring) { isMonitoring = false; scope.launch(Dispatchers.IO) { capture.stop() } }
         if (!hasPermissions) requestPermissions()
     }
 
@@ -805,12 +831,9 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
                     onLoadBacking = { backingLibraryOpen = true },
                     isLoadingBacking = isLoadingBacking,
                     backingLoadProgress = loadProgress,
-                    livePeaks = livePeaks,
-                    interfaceLevel = maxOf(levels.left, levels.right),
-                    outputRoute = outputRoute,
-                    status = status,
                     outputDir = outputDir,
-                    onOpenSetup = { settingsOpen = true }
+                    onOpenSetup = { settingsOpen = true },
+                    recordingElapsedMs = recordingElapsedMs
                 )
                 else -> MixingScreen(
                     tracks = remember(trackVersion) { project.tracks.toList() },
@@ -847,7 +870,8 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
                         }
                     },
                     onTogglePreview = ::toggleMixPreview,
-                    onExport = ::exportFinalVideo
+                    onExport = ::exportFinalVideo,
+                    masterPeakLevel = masterPeakLevel
                 )
             }
         }
@@ -956,7 +980,22 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
             cameraIndex = camera.cameraIndex,
             onCameraSelected = { index -> camera.selectCamera(index) },
             backingName = backingDisplayName,
-            onLoadBacking = { backingLibraryOpen = true },
+            onLoadDemoTrack = {
+                // Load the bundled demo track directly
+                scope.launch {
+                    val demoFile = withContext(Dispatchers.IO) { BundledDemo.ensureWav(activity) }
+                    if (demoFile != null && demoFile.isFile) {
+                        if (loadBackingFile(demoFile, "Demo backing track")) {
+                            rememberBacking(demoFile, "Demo backing track")
+                            status = "Demo backing track loaded. Go to next step."
+                        }
+                    } else {
+                        status = "Could not load demo track."
+                    }
+                }
+            },
+            onChooseBackingFromPhone = { backingLibraryOpen = true },
+            statusMessage = status,
             onBack = { wizardStep = (wizardStep - 1).coerceAtLeast(WizardStep.WELCOME) },
             onNext = ::wizardNext,
             onSkip = ::wizardSkip

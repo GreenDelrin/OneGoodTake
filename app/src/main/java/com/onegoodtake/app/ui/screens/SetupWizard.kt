@@ -73,7 +73,9 @@ fun SetupWizard(
     cameraIndex: Int,
     onCameraSelected: (Int) -> Unit,
     backingName: String?,
-    onLoadBacking: () -> Unit,
+    onLoadDemoTrack: () -> Unit,
+    onChooseBackingFromPhone: () -> Unit,
+    statusMessage: String? = null,
     onBack: () -> Unit,
     onNext: () -> Unit,
     onSkip: () -> Unit
@@ -97,7 +99,7 @@ fun SetupWizard(
                             sourceProfile, onSourceProfileSelected, isTesting, onToggleTest, levels, livePeaks, routeInfo
                         )
                         WizardStep.SOUND -> SoundStep(monitorInput, onMonitorInputChanged, outputRoute, soundHeard, onSoundHeard)
-                        WizardStep.PLAYALONG -> PlayAlongStep(backingName, onLoadBacking)
+                        WizardStep.PLAYALONG -> PlayAlongStep(backingName, onLoadDemoTrack, onChooseBackingFromPhone, statusMessage)
                         WizardStep.READY -> ReadyStep(hasPermissions, devices, selectedDeviceId, monitorInput, cameras, cameraIndex, backingName)
                     }
                 }
@@ -355,7 +357,12 @@ private fun TroubleshootingCard() {
 }
 
 @Composable
-private fun PlayAlongStep(backingName: String?, onLoadBacking: () -> Unit) {
+private fun PlayAlongStep(
+    backingName: String?,
+    onLoadDemoTrack: () -> Unit,
+    onChooseFromPhone: () -> Unit,
+    statusMessage: String? = null
+) {
     WizardTitle("Play along?", "Record your part over a backing track. You can skip this and add one later.")
     Spacer(Modifier.height(16.dp))
     WizardPoint(
@@ -364,9 +371,19 @@ private fun PlayAlongStep(backingName: String?, onLoadBacking: () -> Unit) {
         "The track plays in your headphones and starts with your recording."
     )
     Spacer(Modifier.height(16.dp))
-    AppButton("Load the demo track", onLoadBacking, modifier = Modifier.fillMaxWidth())
+    AppButton("Load the demo track", onLoadDemoTrack, modifier = Modifier.fillMaxWidth())
     Spacer(Modifier.height(8.dp))
-    AppButton("Choose a backing track from your phone", onLoadBacking, modifier = Modifier.fillMaxWidth(), containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurface)
+    AppButton("Choose a backing track from your phone", onChooseFromPhone, modifier = Modifier.fillMaxWidth(), containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurface)
+    if (statusMessage?.isNotBlank() == true) {
+        Spacer(Modifier.height(12.dp))
+        Text(
+            statusMessage,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+        )
+    }
 }
 
 @Composable

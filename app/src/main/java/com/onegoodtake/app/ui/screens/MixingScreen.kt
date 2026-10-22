@@ -51,7 +51,8 @@ fun MixingScreen(
     onTargetLufsChanged: (Float) -> Unit,
     onTrackChange: (Track) -> Unit,
     onTogglePreview: () -> Unit,
-    onExport: () -> Unit
+    onExport: () -> Unit,
+    masterPeakLevel: Float = 0f
 ) {
     var editingTrackId by remember { mutableStateOf<String?>(null) }
     var targetMenuOpen by remember { mutableStateOf(false) }
@@ -91,6 +92,32 @@ fun MixingScreen(
                 contentColor = if (isPreviewPlaying) Color.White else MaterialTheme.colorScheme.onPrimary
             )
         }
+        // Master peak / clip indicator
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(28.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(if (masterPeakLevel >= 0.99f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.surfaceVariant)
+                .padding(horizontal = 14.dp, vertical = 6.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("MASTER", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.width(8.dp))
+                LinearProgressIndicator(
+                    progress = { masterPeakLevel.coerceIn(0f, 1f) },
+                    modifier = Modifier.weight(1f).height(8.dp),
+                    color = if (masterPeakLevel >= 0.99f) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    if (masterPeakLevel >= 0.99f) "CLIP" else "${(20 * Math.log10(masterPeakLevel.coerceAtLeast(0.00001f).toDouble())).toInt()} dBFS",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (masterPeakLevel >= 0.99f) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        Spacer(Modifier.height(4.dp))
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(tracks, key = { it.id }) { track ->
                 TrackLane(
@@ -203,7 +230,12 @@ private fun TrackLane(
         var volume by remember(track.id) { mutableFloatStateOf(track.volumeDb) }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("VOL", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(34.dp))
-            Slider(volume, { v -> volume = v; onTrackChange(track.copy(volumeDb = v)) }, Modifier.weight(1f), valueRange = -36f..6f)
+            Slider(
+                volume,
+                { v -> volume = v; onTrackChange(track.copy(volumeDb = v)) },
+                Modifier.weight(1f).height(32.dp), // taller touch target
+                valueRange = -36f..6f
+            )
             Text("${volume.toInt()} dB", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(48.dp))
         }
     }
@@ -245,7 +277,7 @@ private fun TrackEffectsSheet(track: Track, onTrackChange: (Track) -> Unit, modi
 private fun SliderRow(label: String, valueLabel: String, value: Float, range: ClosedFloatingPointRange<Float>, onChange: (Float) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(62.dp))
-        Slider(value, onChange, Modifier.weight(1f), valueRange = range)
+        Slider(value, onChange, Modifier.weight(1f).height(32.dp), valueRange = range)
         Text(valueLabel, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(42.dp), maxLines = 1)
     }
 }
@@ -254,7 +286,7 @@ private fun SliderRow(label: String, valueLabel: String, value: Float, range: Cl
 private fun EffectSlider(label: String, value: Float, onValueChange: (Float) -> Unit, modifier: Modifier = Modifier) {
     Column(modifier.padding(horizontal = 2.dp)) {
         Text("$label ${value.toInt()}dB", style = MaterialTheme.typography.labelSmall, maxLines = 1)
-        Slider(value, onValueChange, valueRange = -12f..12f)
+        Slider(value, onValueChange, Modifier.height(32.dp).fillMaxWidth(), valueRange = -12f..12f)
     }
 }
 

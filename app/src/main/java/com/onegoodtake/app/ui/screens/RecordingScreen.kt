@@ -62,12 +62,9 @@ fun RecordingScreen(
     onLoadBacking: () -> Unit,
     isLoadingBacking: Boolean,
     backingLoadProgress: Float,
-    livePeaks: List<Float>,
-    interfaceLevel: Float,
-    outputRoute: String,
-    status: String,
     outputDir: File,
-    onOpenSetup: () -> Unit
+    onOpenSetup: () -> Unit,
+    recordingElapsedMs: Long = 0L
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -137,38 +134,13 @@ fun RecordingScreen(
                         .clip(AppCardShape).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f))
                         .padding(horizontal = 14.dp, vertical = 12.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("BACKING", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
-                        Spacer(Modifier.width(8.dp))
-                        Text(backingName ?: "No backing track", modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        AppIconButton(Icons.Filled.Replay, "Restart backing track", onRewindBacking, enabled = backingDurationMs > 0L)
-                        AppIconButton(
-                            if (backingPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                            if (backingPlaying) "Pause backing" else "Play backing",
-                            onPreviewBacking, enabled = backingPeaks.isNotEmpty()
-                        )
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("${time(backingPositionMs)} / ${time(backingDurationMs)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(96.dp))
-                        if (backingPeaks.isNotEmpty()) {
-                            Waveform(
-                                peaks = backingPeaks,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.weight(1f),
-                                progress = backingProgress,
-                                background = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                onSeek = onScrubBacking
-                            )
-                        } else Spacer(Modifier.weight(1f))
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("TAKE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.width(42.dp))
-                        Waveform(livePeaks, MaterialTheme.colorScheme.secondary, Modifier.weight(1f), 1f, MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                        Spacer(Modifier.width(10.dp)); Meter(interfaceLevel)
-                    }
-                    if (outputRoute.isNotBlank()) {
-                        Text(outputRoute, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth(), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
+                    // Recording time for social media limits
+                    Text(
+                        "REC ${time(recordingElapsedMs)}",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = RecordRed,
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                    )
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                         AppButton(
                             if (isFinalizing) "SAVING TAKE…" else "STOP RECORDING",
@@ -250,11 +222,14 @@ fun RecordingScreen(
                         textAlign = androidx.compose.ui.text.style.TextAlign.End
                     )
                 }
-                if (outputRoute.isNotBlank()) {
-                    Text(outputRoute, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth(), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                if (status.isNotBlank()) {
-                    Text(status, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(top = 4.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                // Phone volume hint for backing track
+                if (backingPeaks.isNotEmpty()) {
+                    Text(
+                        "To adjust backing track volume, use your phone's volume buttons",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    )
                 }
             }
         }
