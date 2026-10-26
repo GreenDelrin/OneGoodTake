@@ -9,6 +9,7 @@ data class Track(
     val name: String,
     val sourceUri: String,        // wav/mp3 file or recorded take
     var sourceOffsetMs: Long = 0L,
+    var sourceChannel: Int = -1,  // -1 = all channels; >=0 = read only this channel (mono)
     var volumeDb: Float = 0f,     // -60..+6
     var pan: Float = 0f,         // -1..1
     var eqLowDb: Float = 0f,     // low shelf

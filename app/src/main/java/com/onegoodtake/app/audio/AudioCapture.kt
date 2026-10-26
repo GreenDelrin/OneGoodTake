@@ -32,6 +32,8 @@ class AudioCapture(private val context: Context) {
     @Volatile private var running = false
     @Volatile private var worker: Thread? = null
     private val mainHandler = Handler(Looper.getMainLooper())
+    @Volatile var captureStartElapsedMs: Long = 0L
+    @Volatile var onCaptureStarted: ((Long) -> Unit)? = null
     private val peaks = Collections.synchronizedList(mutableListOf<Float>())
     @Volatile private var warmedUp = false
 
@@ -89,8 +91,9 @@ class AudioCapture(private val context: Context) {
         onDiagnostics: (String) -> Unit = {},
         onOutput: (String) -> Unit = {},
         monitorInput: Boolean = false,
+        monitorPan: Float = 0f,
         sourceProfile: InputSourceProfile = InputSourceProfile.RAW
-    ): Boolean = startCapture(null, deviceId, mode, onLevels, onRoute, onError, onDiagnostics, onOutput, monitorInput, sourceProfile)
+    ): Boolean = startCapture(null, deviceId, mode, onLevels, onRoute, onError, onDiagnostics, onOutput, monitorInput, monitorPan, sourceProfile)
 
     fun startRecording(
         output: File, deviceId: Int?, mode: InputChannelMode,
@@ -100,8 +103,9 @@ class AudioCapture(private val context: Context) {
         onDiagnostics: (String) -> Unit = {},
         onOutput: (String) -> Unit = {},
         monitorInput: Boolean = false,
+        monitorPan: Float = 0f,
         sourceProfile: InputSourceProfile = InputSourceProfile.RAW
-    ): Boolean = startCapture(output, deviceId, mode, onLevels, onRoute, onError, onDiagnostics, onOutput, monitorInput, sourceProfile)
+    ): Boolean = startCapture(output, deviceId, mode, onLevels, onRoute, onError, onDiagnostics, onOutput, monitorInput, monitorPan, sourceProfile)
 
     private fun startCapture(
         output: File?, deviceId: Int?, mode: InputChannelMode,
@@ -111,9 +115,11 @@ class AudioCapture(private val context: Context) {
         onDiagnostics: (String) -> Unit,
         onOutput: (String) -> Unit,
         monitorInput: Boolean,
+        monitorPan: Float,
         sourceProfile: InputSourceProfile
     ): Boolean {
         stop()
+        captureStartElapsedMs = 0L
         synchronized(peaks) { peaks.clear() }
         // Some interfaces keep their output asleep until real samples arrive through the
         // device the app plays to, and the monitoring stays silent until something else
@@ -121,12 +127,12 @@ class AudioCapture(private val context: Context) {
         if (AudioWarmUp.outputIsUsb(context)) AudioWarmUp.warm(context)
         if (sourceProfile == InputSourceProfile.USB_DIRECT) {
             var directError = "UAC2 direct capture could not start."
-            if (startUsbCapture(output, deviceId, mode, onLevels, onRoute, { directError = it }, onDiagnostics, onOutput, monitorInput)) return true
+            if (startUsbCapture(output, deviceId, mode, onLevels, onRoute, { directError = it }, onDiagnostics, onOutput, monitorInput, monitorPan)) return true
             return startCapture(
                 output, deviceId, mode, onLevels, onRoute,
                 { onError("Direct USB failed ($directError); Android backup failed: $it") },
                 { onDiagnostics("Direct USB unavailable ($directError); Android AudioRecord backup: $it") },
-                onOutput, monitorInput, InputSourceProfile.RAW
+                onOutput, monitorInput, monitorPan, InputSourceProfile.RAW
             )
         }
         val device = deviceId?.let { id -> availableInputDevices().firstOrNull { it.id == id } }
@@ -216,6 +222,8 @@ class AudioCapture(private val context: Context) {
         }
         try {
             ar.startRecording()
+            captureStartElapsedMs = android.os.SystemClock.elapsedRealtime()
+            mainHandler.post { onCaptureStarted?.invoke(captureStartElapsedMs) }
             monitorTrack?.play()
         } catch (e: Exception) {
             ar.release()
@@ -295,8 +303,18 @@ class AudioCapture(private val context: Context) {
                         break
                     }
                     if (monitorTrack != null) {
-                        val stereoMonitor = if (outputChannels == 2) selectedSamples else ShortArray(selectedSamples.size * 2).also { stereo ->
+                        val stereoMonitor = if (outputChannels == 2) selectedSamples.copyOf() else ShortArray(selectedSamples.size * 2).also { stereo ->
                             for (i in selectedSamples.indices) { stereo[i * 2] = selectedSamples[i]; stereo[i * 2 + 1] = selectedSamples[i] }
+                        }
+                        if (monitorPan != 0f) {
+                            val gainL = if (monitorPan <= 0f) 1f else 1f - monitorPan
+                            val gainR = if (monitorPan >= 0f) 1f else 1f + monitorPan
+                            var i = 0
+                            while (i + 1 < stereoMonitor.size) {
+                                stereoMonitor[i] = (stereoMonitor[i].toInt() * gainL).toInt().coerceIn(-32768, 32767).toShort()
+                                stereoMonitor[i + 1] = (stereoMonitor[i + 1].toInt() * gainR).toInt().coerceIn(-32768, 32767).toShort()
+                                i += 2
+                            }
                         }
                         val written = monitorTrack.write(stereoMonitor, 0, stereoMonitor.size, AudioTrack.WRITE_NON_BLOCKING)
                         if (written < 0) post { onError("Headphone monitor output failed ($written); input recording continues.") }
@@ -349,7 +367,8 @@ class AudioCapture(private val context: Context) {
         onError: (String) -> Unit,
         onDiagnostics: (String) -> Unit,
         onOutput: (String) -> Unit,
-        monitorInput: Boolean
+        monitorInput: Boolean,
+        monitorPan: Float
     ): Boolean {
         val usbDevice = resolveUsbDevice(deviceId) ?: run {
             onError("Could not match the selected Android input to one USB audio device.")
@@ -450,6 +469,8 @@ class AudioCapture(private val context: Context) {
             return false
         }
 
+        captureStartElapsedMs = android.os.SystemClock.elapsedRealtime()
+        mainHandler.post { onCaptureStarted?.invoke(captureStartElapsedMs) }
         running = true
         worker = Thread({
             var wav: RandomAccessFile? = null
@@ -489,8 +510,18 @@ class AudioCapture(private val context: Context) {
                     }
                     val selectedSamples = PcmFloatChannelMapper.select(buffer.copyOf(sampleCount), inputChannels, mode.channelSelection)
                     if (monitorTrack != null) {
-                        val stereoMonitor = if (outputChannels == 2) selectedSamples else ShortArray(selectedSamples.size * 2).also { stereo ->
+                        val stereoMonitor = if (outputChannels == 2) selectedSamples.copyOf() else ShortArray(selectedSamples.size * 2).also { stereo ->
                             for (i in selectedSamples.indices) { stereo[i * 2] = selectedSamples[i]; stereo[i * 2 + 1] = selectedSamples[i] }
+                        }
+                        if (monitorPan != 0f) {
+                            val gainL = if (monitorPan <= 0f) 1f else 1f - monitorPan
+                            val gainR = if (monitorPan >= 0f) 1f else 1f + monitorPan
+                            var i = 0
+                            while (i + 1 < stereoMonitor.size) {
+                                stereoMonitor[i] = (stereoMonitor[i].toInt() * gainL).toInt().coerceIn(-32768, 32767).toShort()
+                                stereoMonitor[i + 1] = (stereoMonitor[i + 1].toInt() * gainR).toInt().coerceIn(-32768, 32767).toShort()
+                                i += 2
+                            }
                         }
                         val written = monitorTrack.write(stereoMonitor, 0, stereoMonitor.size, AudioTrack.WRITE_NON_BLOCKING)
                         if (written < 0) post { onError("Headphone monitor output failed ($written); input recording continues.") }

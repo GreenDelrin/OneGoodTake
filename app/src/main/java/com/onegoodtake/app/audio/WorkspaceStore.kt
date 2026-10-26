@@ -51,7 +51,7 @@ fun restoreProject(values: Map<String, String>): Project {
         id = values["project.id"] ?: "p1",
         title = values["project.title"] ?: "Untitled",
         videoUri = values["project.videoUri"],
-        syncOffsetMs = values["project.syncOffsetMs"]?.toIntOrNull()?.coerceIn(-200, 200) ?: 0,
+        syncOffsetMs = values["project.syncOffsetMs"]?.toIntOrNull()?.coerceIn(-5000, 5000) ?: 0,
         trimStartMs = if (savedTrimEnd == 0L || savedTrimEnd > savedTrimStart) savedTrimStart else 0L,
         trimEndMs = if (savedTrimEnd > savedTrimStart) savedTrimEnd else 0L
     )
@@ -70,6 +70,7 @@ fun restoreProject(values: Map<String, String>): Project {
             name = values[prefix + "name"] ?: "Audio track",
             sourceUri = source,
             sourceOffsetMs = values[prefix + "sourceOffsetMs"]?.toLongOrNull()?.coerceAtLeast(0L) ?: 0L,
+            sourceChannel = values[prefix + "sourceChannel"]?.toIntOrNull() ?: -1,
             volumeDb = values.floatValue(prefix + "volumeDb", 0f, -60f..6f),
             pan = values.floatValue(prefix + "pan", 0f, -1f..1f),
             eqLowDb = values.floatValue(prefix + "eqLowDb", 0f, -12f..12f),
@@ -102,6 +103,7 @@ fun Project.writeTo(values: MutableMap<String, String>) {
         values[prefix + "name"] = track.name
         values[prefix + "sourceUri"] = track.sourceUri
         values[prefix + "sourceOffsetMs"] = track.sourceOffsetMs.toString()
+        values[prefix + "sourceChannel"] = track.sourceChannel.toString()
         values[prefix + "volumeDb"] = track.volumeDb.toString()
         values[prefix + "pan"] = track.pan.toString()
         values[prefix + "eqLowDb"] = track.eqLowDb.toString()

@@ -23,8 +23,8 @@ public final class AudioPipelineSelfTest {
         if (decoded == null || decoded.getChannels() != 2 || decoded.getSampleRate() != 48000 || decoded.getSamples().length != stereo.length)
             throw new AssertionError("stereo WAV round-trip failed");
 
-        Track backing = new Track("backing", "Backing", "file://" + backingFile.getAbsolutePath(), 250L, 0f, 0f, 0f, 0f, 0f, 0f, 0f, false, false);
-        Track input = new Track("input", "Input", "file://" + inputFile.getAbsolutePath(), 0L, 0f, 0f, 0f, 0f, 0f, 0f, 0.5f, false, false);
+        Track backing = new Track("backing", "Backing", "file://" + backingFile.getAbsolutePath(), 250L, -1, 0f, 0f, 0f, 0f, 0f, 0f, 0f, false, false);
+        Track input = new Track("input", "Input", "file://" + inputFile.getAbsolutePath(), 0L, -1, 0f, 0f, 0f, 0f, 0f, 0f, 0.5f, false, false);
         float lufs = Mixer.INSTANCE.mix(java.util.Arrays.asList(backing, input), mixFile);
         WavIO.Pcm mixed = WavIO.INSTANCE.read(mixFile);
         if (mixed == null || mixed.getChannels() != 2 || mixed.getSampleRate() != 48000 || mixed.getSamples().length != 96000)

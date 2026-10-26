@@ -27,6 +27,8 @@ fun InputSetupDialog(
     isTesting: Boolean,
     onToggleTest: () -> Unit,
     monitorInput: Boolean,
+    monitorPan: Float = 0f,
+    onMonitorPanChanged: (Float) -> Unit = {},
     onMonitorInputChanged: (Boolean) -> Unit,
     levels: InputLevels,
     routedDevice: String,
@@ -127,6 +129,24 @@ fun InputSetupDialog(
                         )
                     }
                     Switch(monitorInput, onMonitorInputChanged)
+                }
+                if (monitorInput) {
+                    Text("Monitor pan / balance", style = MaterialTheme.typography.labelSmall)
+                    Slider(
+                        value = monitorPan,
+                        onValueChange = onMonitorPanChanged,
+                        valueRange = -1f..1f,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        when {
+                            monitorPan < -0.05f -> "Pan left"
+                            monitorPan > 0.05f -> "Pan right"
+                            else -> "Centre"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
                 Text(
                     if (routedDevice.isBlank()) "No route detected" else "Android route: $routedDevice",

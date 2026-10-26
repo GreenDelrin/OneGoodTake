@@ -64,7 +64,7 @@ fun warmUp() {
                 if (AudioWarmUp.outputIsUsb(appContext)) AudioWarmUp.warm(appContext)
                 for (track in latestTracks.get()) {
                     val file = fileFromUri(track.sourceUri) ?: throw IllegalArgumentException("${track.name} is not a local audio file")
-                    sources += RealtimeWavSource(track.id, file, track.sourceOffsetMs + trimStartMs)
+                    sources += RealtimeWavSource(track.id, file, track.sourceOffsetMs + trimStartMs, track.sourceChannel)
                 }
                 check(sources.isNotEmpty()) { "No readable audio tracks were found" }
                 val trimFrames = if (trimEndMs > 0L) {
@@ -188,10 +188,12 @@ fun warmUp() {
 internal class RealtimeWavSource(
     override val id: String,
     file: File,
-    offsetMs: Long
+    offsetMs: Long,
+    channelIndex: Int = -1
 ) : RealtimeMixSource {
     private val sourceName = file.name
     private val wav = RandomAccessFile(file, "r")
+    private val requestedChannel = channelIndex
     private val channels: Int
     private val sampleRate: Int
     private val frameBytes: Int
@@ -256,9 +258,15 @@ internal class RealtimeWavSource(
     private fun readSourceFrame(out: FloatArray): Boolean {
         if (nextReadFrame >= dataFrames) return false
         if (bufferPosition + frameBytes > bufferSize && !refillBuffer()) return false
-        val left = readShortFromBuffer().toFloat()
-        out[0] = left
-        out[1] = if (channels == 1) left else readShortFromBuffer().toFloat()
+        val samples = FloatArray(channels) { readShortFromBuffer().toFloat() }
+        if (requestedChannel in 0 until channels) {
+            val chosen = samples[requestedChannel]
+            out[0] = chosen
+            out[1] = chosen
+        } else {
+            out[0] = samples.getOrElse(0) { 0f }
+            out[1] = if (channels >= 2) samples.getOrElse(1) { samples[0] } else samples.getOrElse(0) { 0f }
+        }
         nextReadFrame++
         return true
     }

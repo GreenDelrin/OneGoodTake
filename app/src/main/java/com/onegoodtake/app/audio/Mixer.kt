@@ -12,7 +12,7 @@ object Mixer {
         try {
             for (track in activeTracks) {
                 val file = fileFromUri(track.sourceUri) ?: continue
-                try { sources += RealtimeWavSource(track.id, file, track.sourceOffsetMs) } catch (_: Exception) { }
+                try { sources += RealtimeWavSource(track.id, file, track.sourceOffsetMs, track.sourceChannel) } catch (_: Exception) { }
             }
             require(sources.isNotEmpty()) { "No readable PCM audio tracks were found" }
 

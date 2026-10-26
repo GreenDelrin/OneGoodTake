@@ -166,6 +166,9 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
     var isStartingTake by remember { mutableStateOf(false) }
     var isMonitoring by remember { mutableStateOf(false) }
     var monitorInput by remember { mutableStateOf(restored["capture.monitorInput"]?.toBooleanStrictOrNull() ?: false) }
+    var monitorPan by remember { mutableFloatStateOf(restored["capture.monitorPan"]?.toFloatOrNull() ?: 0f) }
+    var audioStartMs by remember { mutableLongStateOf(0L) }
+    var videoStartMs by remember { mutableLongStateOf(0L) }
     var isLoadingBacking by remember { mutableStateOf(false) }
     var loadProgress by remember { mutableFloatStateOf(0f) }
     var isExporting by remember { mutableStateOf(false) }
@@ -266,6 +269,7 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
         snapshot["capture.deviceIdentity"] = selectedDeviceIdentity
         snapshot["capture.userSelectedInput"] = userSelectedInput.toString()
         snapshot["capture.monitorInput"] = monitorInput.toString()
+        snapshot["capture.monitorPan"] = monitorPan.toString()
         snapshot["capture.keepScreenOn"] = keepScreenOn.toString()
         snapshot["backing.path"] = backingTrack?.absolutePath.orEmpty()
         snapshot["backing.name"] = backingDisplayName
@@ -619,6 +623,7 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
             onDiagnostics = { inputDiagnostics = it },
             onOutput = { outputRoute = it },
             monitorInput = monitorInput,
+            monitorPan = monitorPan,
             sourceProfile = sourceProfile
         )
         isMonitoring = started
@@ -628,6 +633,12 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
     suspend fun startCaptureAndCamera(video: File) {
         val audio = recordedAudio ?: return
         isStartingTake = true
+        audioStartMs = 0L
+        videoStartMs = 0L
+        capture.onCaptureStarted = { ms ->
+            audioStartMs = ms
+            if (backingPlaying) takeBackingStartMs = backingPlayer.currentPositionMs()
+        }
         val captureStarted = withContext(Dispatchers.IO) {
             capture.startRecording(audio, selectedDeviceId, mode,
                 onLevels = { levels = it },
@@ -636,6 +647,7 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
                 onDiagnostics = { inputDiagnostics = it },
                 onOutput = { route -> activity.runOnUiThread { outputRoute = route } },
                 monitorInput = monitorInput,
+                monitorPan = monitorPan,
                 sourceProfile = sourceProfile
             )
         }
@@ -646,6 +658,9 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
         videoFinalize = CompletableDeferred()
         try {
             camera.start(video) { event ->
+                if (event is androidx.camera.video.VideoRecordEvent.Start && videoStartMs == 0L) {
+                    videoStartMs = android.os.SystemClock.elapsedRealtime()
+                }
                 if (event is androidx.camera.video.VideoRecordEvent.Finalize) {
                     videoFinalize?.complete(!event.hasError())
                     if (event.hasError()) status = "Video recording failed (${event.error})."
@@ -709,6 +724,11 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
             withContext(Dispatchers.IO) { capture.stop() }
             val videoOk = withTimeoutOrNull(10_000) { finalize?.await() } ?: false
             livePeaks = capture.livePeaks()
+            capture.onCaptureStarted = null
+            if (audioStartMs > 0L && videoStartMs > 0L) {
+                val offset = (audioStartMs - videoStartMs).toInt()
+                project.syncOffsetMs = offset.coerceIn(-5000, 5000)
+            }
             if (!videoOk || recordedAudio?.let { it.exists() && it.length() > 44L } != true) {
                 status = "Take did not finish correctly. Open setup and test the selected input."
                 isFinalizing = false
@@ -716,15 +736,20 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
             }
             project.tracks.clear()
             backingTrack?.let { project.tracks += Track("backing", "Backing track", "file://${it.absolutePath}", sourceOffsetMs = takeBackingStartMs) }
-            recordedAudio?.let {
-                project.tracks += Track("interface", mode.label, "file://${it.absolutePath}")
+            recordedAudio?.let { file ->
+                if (mode == InputChannelMode.INPUTS_1_2_STEREO) {
+                    project.tracks += Track("interface-1", "Input 1", "file://${file.absolutePath}", sourceChannel = 0, pan = -1f)
+                    project.tracks += Track("interface-2", "Input 2", "file://${file.absolutePath}", sourceChannel = 1, pan = 1f)
+                } else {
+                    project.tracks += Track("interface", mode.label, "file://${file.absolutePath}")
+                }
             }
             completedVideo = recordedVideo
             videoDurationMs = completedVideo?.let { file -> withContext(Dispatchers.IO) { readVideoDurationMs(file) } } ?: 0L
             project.trimStartMs = 0L
             project.trimEndMs = videoDurationMs
             trackVersion++
-            status = "Take saved — mixing is ready."
+            status = "Take saved — mixing is ready (A/V offset ${project.syncOffsetMs} ms)."
             isFinalizing = false
             screen = "mix"
         }
@@ -963,6 +988,8 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
             isTesting = isMonitoring,
             onToggleTest = ::startInputTest,
             monitorInput = monitorInput,
+            monitorPan = monitorPan,
+            onMonitorPanChanged = { monitorPan = it },
             onMonitorInputChanged = { monitorInput = it },
             levels = levels,
             routedDevice = routeInfo,
