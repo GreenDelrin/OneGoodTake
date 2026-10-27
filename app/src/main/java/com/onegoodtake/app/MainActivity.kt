@@ -68,6 +68,7 @@ import com.onegoodtake.app.audio.restoreBackingLibrary
 import com.onegoodtake.app.audio.writeBackingLibrary
 import com.onegoodtake.app.audio.writeTo
 import com.onegoodtake.app.camera.RecordingController
+import com.onegoodtake.app.camera.VideoQuality
 import com.onegoodtake.app.player.AudioPlayer
 import com.onegoodtake.app.ui.VideoPreviewController
 import com.onegoodtake.app.ui.components.AppIconButton
@@ -140,14 +141,21 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
     val workspaceStore = remember { WorkspaceStore(activity) }
     val project = remember { restoreProject(restored) }
     var cameraLabel by remember { mutableStateOf("CAMERA") }
+    var videoQuality by remember {
+        mutableStateOf(VideoQuality.values().firstOrNull { it.name == restored["capture.videoQuality"] } ?: VideoQuality.FHD_1080)
+    }
+    var supportedVideoQualities by remember { mutableStateOf(VideoQuality.values().toList()) }
     val camera = remember {
         RecordingController(activity).apply {
             onCameraChanged = { label -> cameraLabel = label }
+            videoQuality = videoQuality
             val savedIndex = restored["camera.index"]?.toIntOrNull()
             if (savedIndex != null) selectCamera(savedIndex)
             else usePreferredFacing(restored["camera.front"]?.toBooleanStrictOrNull() ?: true)
         }
     }
+    camera.onSupportedQualitiesChanged = { supported -> supportedVideoQualities = supported }
+    LaunchedEffect(videoQuality) { camera.updateVideoQuality(videoQuality) }
     val capture = remember { AudioCapture(activity) }
     LaunchedEffect(Unit) { capture.warmUp() }
     val backingPlayer = remember { AudioPlayer(activity) }
@@ -167,6 +175,7 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
     var isMonitoring by remember { mutableStateOf(false) }
     var monitorInput by remember { mutableStateOf(restored["capture.monitorInput"]?.toBooleanStrictOrNull() ?: false) }
     var monitorPan by remember { mutableFloatStateOf(restored["capture.monitorPan"]?.toFloatOrNull() ?: 0f) }
+    var syncLREdit by remember { mutableStateOf(restored["mix.syncLREdit"]?.toBooleanStrictOrNull() ?: true) }
     var audioStartMs by remember { mutableLongStateOf(0L) }
     var videoStartMs by remember { mutableLongStateOf(0L) }
     var isLoadingBacking by remember { mutableStateOf(false) }
@@ -270,6 +279,8 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
         snapshot["capture.userSelectedInput"] = userSelectedInput.toString()
         snapshot["capture.monitorInput"] = monitorInput.toString()
         snapshot["capture.monitorPan"] = monitorPan.toString()
+        snapshot["capture.videoQuality"] = videoQuality.name
+        snapshot["mix.syncLREdit"] = syncLREdit.toString()
         snapshot["capture.keepScreenOn"] = keepScreenOn.toString()
         snapshot["backing.path"] = backingTrack?.absolutePath.orEmpty()
         snapshot["backing.name"] = backingDisplayName
@@ -635,6 +646,17 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
         isStartingTake = true
         audioStartMs = 0L
         videoStartMs = 0L
+        val freeBytes = try { android.os.StatFs(outputDir.absolutePath).availableBytes } catch (_: Exception) { Long.MAX_VALUE }
+        val required = when (videoQuality) {
+            VideoQuality.UHD_4K -> 2_000_000_000L
+            VideoQuality.FHD_1080 -> 500_000_000L
+            else -> 200_000_000L
+        }
+        if (freeBytes < required) {
+            status = "Not enough free storage for ${videoQuality.label}. Free up space or lower quality."
+            isStartingTake = false
+            return
+        }
         capture.onCaptureStarted = { ms ->
             audioStartMs = ms
             if (backingPlaying) takeBackingStartMs = backingPlayer.currentPositionMs()
@@ -921,10 +943,29 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
                             trackVersion++
                         }
                     },
+                    syncLREdit = syncLREdit,
+                    onSyncLREditChanged = { syncLREdit = it },
                     onTrackChange = { updated ->
                         val index = project.tracks.indexOfFirst { it.id == updated.id }
                         if (index >= 0) {
                             project.tracks[index] = updated
+                            if (syncLREdit && (updated.id == "interface-1" || updated.id == "interface-2")) {
+                                val partnerId = if (updated.id == "interface-1") "interface-2" else "interface-1"
+                                val partnerIndex = project.tracks.indexOfFirst { it.id == partnerId }
+                                if (partnerIndex >= 0) {
+                                    val partner = project.tracks[partnerIndex]
+                                    project.tracks[partnerIndex] = partner.copy(
+                                        volumeDb = updated.volumeDb,
+                                        eqLowDb = updated.eqLowDb,
+                                        eqMidDb = updated.eqMidDb,
+                                        eqHighDb = updated.eqHighDb,
+                                        reverbSend = updated.reverbSend,
+                                        compressorAmount = updated.compressorAmount,
+                                        muted = updated.muted,
+                                        solo = updated.solo
+                                    )
+                                }
+                            }
                             mixPreview.updateTracks(project.tracks.toList())
                             trackVersion++
                         }
@@ -991,6 +1032,9 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
             monitorPan = monitorPan,
             onMonitorPanChanged = { monitorPan = it },
             onMonitorInputChanged = { monitorInput = it },
+            videoQuality = videoQuality,
+            supportedVideoQualities = supportedVideoQualities,
+            onVideoQualitySelected = { videoQuality = it },
             levels = levels,
             routedDevice = routeInfo,
             diagnostics = inputDiagnostics,

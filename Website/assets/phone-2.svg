@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" role="img" aria-label="Phone screenshot placeholder 1080 by 1920">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1B2A4A"/>
+      <stop offset="1" stop-color="#0E1526"/>
+    </linearGradient>
+  </defs>
+  <rect width="1080" height="1920" fill="url(#bg)"/>
+  <g fill="#F4B942" opacity="0.95">
+    <rect x="400" y="840" width="14" height="100" rx="7"/>
+    <rect x="430" y="800" width="14" height="180" rx="7"/>
+    <rect x="460" y="830" width="14" height="120" rx="7"/>
+    <rect x="490" y="780" width="14" height="220" rx="7"/>
+    <rect x="520" y="820" width="14" height="140" rx="7"/>
+    <rect x="550" y="790" width="14" height="200" rx="7"/>
+    <rect x="580" y="830" width="14" height="120" rx="7"/>
+    <rect x="610" y="800" width="14" height="180" rx="7"/>
+    <rect x="640" y="840" width="14" height="100" rx="7"/>
+  </g>
+  <text x="540" y="1010" text-anchor="middle" fill="#F5F7FB" font-family="Segoe UI, Roboto, sans-serif" font-size="44" font-weight="600">Mix screen</text>
+  <text x="540" y="1070" text-anchor="middle" fill="#A6B2C9" font-family="Segoe UI, Roboto, sans-serif" font-size="30">Placeholder · 1080 × 1920</text>
+</svg>

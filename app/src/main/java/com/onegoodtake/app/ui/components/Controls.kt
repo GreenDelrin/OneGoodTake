@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -65,7 +67,8 @@ fun AppButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     containerColor: Color = MaterialTheme.colorScheme.primary,
-    contentColor: Color = MaterialTheme.colorScheme.onPrimary
+    contentColor: Color = MaterialTheme.colorScheme.onPrimary,
+    leadingIcon: androidx.compose.ui.graphics.vector.ImageVector? = null
 ) {
     Button(
         onClick = onClick,
@@ -73,7 +76,13 @@ fun AppButton(
         modifier = modifier,
         shape = AppButtonShape,
         colors = ButtonDefaults.buttonColors(containerColor = containerColor, contentColor = contentColor)
-    ) { Text(text) }
+    ) {
+        if (leadingIcon != null) {
+            Icon(leadingIcon, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+        }
+        Text(text)
+    }
 }
 /** Quiet label used for the section headings. */
 @Composable

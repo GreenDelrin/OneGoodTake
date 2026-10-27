@@ -10,6 +10,9 @@ import android.view.WindowManager
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.core.AspectRatio
 import androidx.camera.core.CameraSelector
+import androidx.camera.video.Quality
+import androidx.camera.video.QualitySelector
+import androidx.camera.video.FallbackStrategy
 import androidx.camera.core.Preview
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
@@ -45,6 +48,11 @@ class RecordingController(private val context: Context) {
         private set
     var cameraIndex: Int = 0
         private set
+
+    var videoQuality: VideoQuality = VideoQuality.FHD_1080
+    var supportedVideoQualities: List<VideoQuality> = VideoQuality.values().toList()
+        private set
+    var onSupportedQualitiesChanged: ((List<VideoQuality>) -> Unit)? = null
 
     private var requestedIndex: Int = -1
     private var preferFront: Boolean = true
@@ -84,6 +92,11 @@ class RecordingController(private val context: Context) {
         preferFront = front
         requestedIndex = -1
         applySelection()
+    }
+
+    fun updateVideoQuality(q: VideoQuality) {
+        videoQuality = q
+        applyCamera()
     }
 
     /** Move to the next camera: rear lenses first, then the selfie ones. */
@@ -131,8 +144,14 @@ class RecordingController(private val context: Context) {
         val owner = lifecycleOwner ?: return
         val view = previewView ?: return
         val option = cameras.getOrNull(cameraIndex) ?: return
-        // 16:9 in sensor space becomes a 9:16 portrait video, which is what social platforms expect.
-        val recorder = Recorder.Builder().setAspectRatio(AspectRatio.RATIO_16_9).build()
+        val qualitySelector = QualitySelector.from(
+            videoQuality.cameraQuality,
+            FallbackStrategy.lowerQualityOrHigherThan(Quality.SD)
+        )
+        val recorder = Recorder.Builder()
+            .setQualitySelector(qualitySelector)
+            .setAspectRatio(AspectRatio.RATIO_16_9)
+            .build()
         videoCapture = VideoCapture.withOutput(recorder)
         val resolutionSelector = ResolutionSelector.Builder()
             .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
@@ -146,7 +165,24 @@ class RecordingController(private val context: Context) {
             p.unbindAll()
             p.bindToLifecycle(owner, selectorFor(option.id), preview, videoCapture)
             rotationHint = computeRotation(option)
+            detectSupportedQualities(p, option.id)
         } catch (_: Exception) { }
+    }
+
+    private fun detectSupportedQualities(provider: ProcessCameraProvider, cameraId: String) {
+        val cameraInfo = provider.availableCameraInfos.firstOrNull { info ->
+            runCatching { Camera2CameraInfo.from(info).cameraId == cameraId }.getOrDefault(false)
+        } ?: return
+        val supported = runCatching { QualitySelector.getSupportedQualities(cameraInfo) }.getOrNull() ?: return
+        val mapped = VideoQuality.values().filter { vq -> vq.cameraQuality in supported }
+        if (mapped.isEmpty()) return
+        supportedVideoQualities = mapped
+        onSupportedQualitiesChanged?.invoke(mapped)
+        // If current selection isn't supported, fall back to highest supported
+        if (videoQuality !in mapped) {
+            videoQuality = mapped.maxByOrNull { it.ordinal } ?: mapped.last()
+            onSupportedQualitiesChanged?.invoke(mapped)
+        }
     }
 
     private fun selectorFor(id: String): CameraSelector = CameraSelector.Builder()

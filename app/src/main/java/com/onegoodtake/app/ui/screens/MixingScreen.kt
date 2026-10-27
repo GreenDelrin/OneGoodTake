@@ -8,6 +8,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -50,6 +52,8 @@ fun MixingScreen(
     onTrimChanged: (Long, Long) -> Unit,
     onTargetLufsChanged: (Float) -> Unit,
     onTrackChange: (Track) -> Unit,
+    syncLREdit: Boolean = false,
+    onSyncLREditChanged: (Boolean) -> Unit = {},
     onTogglePreview: () -> Unit,
     onExport: () -> Unit,
     masterPeakLevel: Float = 0f
@@ -89,7 +93,8 @@ fun MixingScreen(
                 onTogglePreview,
                 enabled = tracks.isNotEmpty() && !isExporting,
                 containerColor = if (isPreviewPlaying) RecordRed else MaterialTheme.colorScheme.primary,
-                contentColor = if (isPreviewPlaying) Color.White else MaterialTheme.colorScheme.onPrimary
+                contentColor = if (isPreviewPlaying) Color.White else MaterialTheme.colorScheme.onPrimary,
+                leadingIcon = if (isPreviewPreparing) null else if (isPreviewPlaying) Icons.Filled.Stop else Icons.Filled.PlayArrow
             )
         }
         // Master peak / clip indicator
@@ -118,16 +123,38 @@ fun MixingScreen(
             }
         }
         Spacer(Modifier.height(4.dp))
+        val hasSplitPair = tracks.any { it.id == "interface-1" } && tracks.any { it.id == "interface-2" }
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(tracks, key = { it.id }) { track ->
-                TrackLane(
-                    track = track,
-                    peaks = trackWaveforms[track.id].orEmpty(),
-                    progress = if (previewDurationMs > 0L) previewPositionMs.toFloat() / previewDurationMs else 0f,
-                    enabled = !isExporting,
-                    onTrackChange = onTrackChange,
-                    onEditEffects = { editingTrackId = track.id }
-                )
+            tracks.forEach { track ->
+                item(key = track.id) {
+                    TrackLane(
+                        track = track,
+                        peaks = trackWaveforms[track.id].orEmpty(),
+                        progress = if (previewDurationMs > 0L) previewPositionMs.toFloat() / previewDurationMs else 0f,
+                        enabled = !isExporting,
+                        onTrackChange = onTrackChange,
+                        onEditEffects = { editingTrackId = track.id }
+                    )
+                }
+                if (track.id == "backing" && hasSplitPair) {
+                item(key = "sync-inputs-toggle") {
+                        Row(
+                            Modifier.fillMaxWidth().clip(AppCardShape).background(MaterialTheme.colorScheme.surface).padding(horizontal = 14.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Sync Input 1+2 Edit", style = MaterialTheme.typography.titleSmall)
+                                Text(
+                                    if (syncLREdit) "Volume, EQ, reverb, comp synced (pan stays independent)"
+                                    else "Edit Input 1 and Input 2 independently",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(checked = syncLREdit, onCheckedChange = onSyncLREditChanged)
+                        }
+                    }
+                }
             }
             if (tracks.isEmpty()) item {
                 Text("Finish a take to see your audio tracks here.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))
@@ -166,7 +193,9 @@ fun MixingScreen(
                 if (isExporting) "Exporting…" else "Export",
                 onExport,
                 modifier = Modifier.weight(1f),
-                enabled = canExport && !isExporting
+                enabled = canExport && !isExporting,
+                containerColor = RecordRed,
+                contentColor = Color.White
             )
         }
     }
@@ -228,6 +257,7 @@ private fun TrackLane(
             }
         }
         var volume by remember(track.id) { mutableFloatStateOf(track.volumeDb) }
+        LaunchedEffect(track.volumeDb) { volume = track.volumeDb }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("VOL", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(34.dp))
             Slider(
@@ -250,6 +280,12 @@ private fun TrackEffectsSheet(track: Track, onTrackChange: (Track) -> Unit, modi
     var high by remember(track.id) { mutableFloatStateOf(track.eqHighDb) }
     var reverb by remember(track.id) { mutableFloatStateOf(track.reverbSend) }
     var compressor by remember(track.id) { mutableFloatStateOf(track.compressorAmount) }
+    LaunchedEffect(track.volumeDb) { volume = track.volumeDb }
+    LaunchedEffect(track.eqLowDb) { low = track.eqLowDb }
+    LaunchedEffect(track.eqMidDb) { mid = track.eqMidDb }
+    LaunchedEffect(track.eqHighDb) { high = track.eqHighDb }
+    LaunchedEffect(track.reverbSend) { reverb = track.reverbSend }
+    LaunchedEffect(track.compressorAmount) { compressor = track.compressorAmount }
     fun update() = onTrackChange(track.copy(
         volumeDb = volume, pan = pan, eqLowDb = low, eqMidDb = mid,
         eqHighDb = high, reverbSend = reverb, compressorAmount = compressor

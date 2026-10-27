@@ -12,7 +12,9 @@ import androidx.compose.ui.unit.dp
 import com.onegoodtake.app.audio.InputChannelMode
 import com.onegoodtake.app.audio.InputLevels
 import com.onegoodtake.app.audio.InputSourceProfile
+import com.onegoodtake.app.camera.VideoQuality
 import com.onegoodtake.app.ui.components.AppButton
+import com.onegoodtake.app.BuildConfig
 import com.onegoodtake.app.ui.components.SectionLabel
 
 @Composable
@@ -30,6 +32,9 @@ fun InputSetupDialog(
     monitorPan: Float = 0f,
     onMonitorPanChanged: (Float) -> Unit = {},
     onMonitorInputChanged: (Boolean) -> Unit,
+    videoQuality: VideoQuality = VideoQuality.FHD_1080,
+    supportedVideoQualities: List<VideoQuality> = VideoQuality.values().toList(),
+    onVideoQualitySelected: (VideoQuality) -> Unit = {},
     levels: InputLevels,
     routedDevice: String,
     diagnostics: String,
@@ -108,6 +113,23 @@ fun InputSetupDialog(
                     }
                 }
                 Spacer(Modifier.height(12.dp))
+                SectionLabel("VIDEO QUALITY")
+                supportedVideoQualities.forEach { option ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(videoQuality == option, onClick = { onVideoQualitySelected(option) })
+                        Column {
+                            Text(option.label)
+                            if (option == VideoQuality.UHD_4K) {
+                                Text(
+                                    "4K — large files, supported devices only",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
                 SectionLabel("LIVE INPUT LEVELS")
                 InputMeter("L / Input 1", levels.left)
                 InputMeter("R / Input 2", levels.right)
@@ -169,6 +191,11 @@ fun InputSetupDialog(
                     Switch(keepScreenOn, onKeepScreenOnChanged)
                 }
                 TextButton(onClick = onRunSetupWizard) { Text("Run the setup wizard again") }
+                Text(
+                    "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         },
         confirmButton = {

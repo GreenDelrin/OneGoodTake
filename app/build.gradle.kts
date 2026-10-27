@@ -12,8 +12,8 @@ android {
         applicationId = "com.onegoodtake.app"
         minSdk = 29
         targetSdk = 34
-versionCode = 8
-        versionName = "1.6"
+versionCode = 9
+        versionName = "1.7"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
@@ -31,7 +31,7 @@ versionCode = 8
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
     externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }
     packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
