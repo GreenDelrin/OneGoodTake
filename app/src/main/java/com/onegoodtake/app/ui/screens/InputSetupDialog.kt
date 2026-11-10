@@ -1,7 +1,10 @@
 package com.onegoodtake.app.ui.screens
 
+import android.content.Intent
 import android.media.AudioDeviceInfo
+import android.net.Uri
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -19,6 +22,8 @@ import com.onegoodtake.app.camera.VideoQuality
 import com.onegoodtake.app.ui.components.AppButton
 import com.onegoodtake.app.BuildConfig
 import com.onegoodtake.app.ui.components.SectionLabel
+
+private const val DONATION_URL = "https://giannichiarello.com/product/donation/"
 
 @Composable
 fun InputSetupDialog(
@@ -50,6 +55,7 @@ fun InputSetupDialog(
     onRunSetupWizard: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Recording setup", style = MaterialTheme.typography.titleLarge) },
@@ -227,6 +233,9 @@ fun InputSetupDialog(
                     Switch(keepScreenOn, onKeepScreenOnChanged)
                 }
                 TextButton(onClick = onRunSetupWizard) { Text("Run the setup wizard again") }
+                TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(DONATION_URL))) }) {
+                    Text("Support the developer", style = MaterialTheme.typography.labelSmall)
+                }
                 Text(
                     "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
                     style = MaterialTheme.typography.labelSmall,
