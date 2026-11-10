@@ -6,6 +6,10 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.PackageManager
+import android.content.BroadcastReceiver
+import android.content.Intent
+import android.content.IntentFilter
+import android.hardware.usb.UsbManager
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.MediaMetadataRetriever
@@ -202,6 +206,11 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
     val restoredDevice = inputDevices.firstOrNull { it.workspaceIdentity() == savedDeviceIdentity }
     var selectedDeviceIdentity by remember { mutableStateOf(savedDeviceIdentity) }
     var selectedDeviceId by remember { mutableStateOf(restoredDevice?.id) }
+    var usbInterfaces by remember { mutableStateOf(capture.usbAudioInterfaces()) }
+    val savedUsbKey = restored["capture.usbKey"].orEmpty()
+    var selectedUsbKey by remember {
+        mutableStateOf(savedUsbKey.takeIf { key -> key.isNotBlank() && usbInterfaces.any { it.key == key } })
+    }
     var userSelectedInput by remember {
         mutableStateOf(restored["capture.userSelectedInput"]?.toBooleanStrictOrNull() == true && (restoredDevice != null || savedDeviceIdentity.isEmpty()))
     }
@@ -276,6 +285,7 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
         snapshot["capture.profile"] = sourceProfile.name
         snapshot["capture.profileManual"] = sourceProfileManuallySelected.toString()
         snapshot["capture.deviceIdentity"] = selectedDeviceIdentity
+        snapshot["capture.usbKey"] = selectedUsbKey.orEmpty()
         snapshot["capture.userSelectedInput"] = userSelectedInput.toString()
         snapshot["capture.monitorInput"] = monitorInput.toString()
         snapshot["capture.monitorPan"] = monitorPan.toString()
@@ -314,8 +324,8 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
             permissionLauncher.launch(required)
         }
     }
-    LaunchedEffect(inputDevices, userSelectedInput, selectedDeviceId, selectedDeviceIdentity, sourceProfileManuallySelected) {
-        if (!userSelectedInput && selectedDeviceId == null) {
+    LaunchedEffect(inputDevices, usbInterfaces, userSelectedInput, selectedDeviceId, selectedDeviceIdentity, selectedUsbKey, sourceProfileManuallySelected) {
+        if (!userSelectedInput && selectedDeviceId == null && selectedUsbKey == null) {
             val preferred = inputDevices.firstOrNull { it.workspaceIdentity() == selectedDeviceIdentity }
             val device = preferred ?: inputDevices.firstOrNull { it.isUsbAudioInput() }
             if (device != null) {
@@ -323,11 +333,21 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
                 selectedDeviceIdentity = device.workspaceIdentity()
                 userSelectedInput = true
                 routeInfo = "${device.productName} detected; test input in setup"
+            } else {
+                // An interface the phone's audio stack does not list as an input is still worth
+                // capturing from directly, so pick it up on its own.
+                val usb = usbInterfaces.firstOrNull()
+                if (usb != null) {
+                    selectedUsbKey = usb.key
+                    userSelectedInput = true
+                    routeInfo = "${usb.name} detected; test input in setup"
+                }
             }
         }
         if (!sourceProfileManuallySelected) {
             val selected = inputDevices.firstOrNull { it.id == selectedDeviceId }
-            if (selected != null) sourceProfile = if (selected.isUsbAudioInput()) InputSourceProfile.USB_DIRECT else InputSourceProfile.RAW
+            if (selectedUsbKey != null) sourceProfile = InputSourceProfile.USB_DIRECT
+            else if (selected != null) sourceProfile = if (selected.isUsbAudioInput()) InputSourceProfile.USB_DIRECT else InputSourceProfile.RAW
             else if (inputDevices.isNotEmpty() && inputDevices.none { it.isUsbAudioInput() }) sourceProfile = InputSourceProfile.RAW
         }
     }
@@ -339,11 +359,13 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
         if (project.trimEndMs == 0L || project.trimEndMs > duration) project.trimEndMs = duration
         if (project.trimStartMs >= project.trimEndMs) project.trimStartMs = 0L
     }
-    LaunchedEffect(hasPermissions, selectedDeviceId, sourceProfile) {
-        if (hasPermissions && sourceProfile == InputSourceProfile.USB_DIRECT && selectedDeviceId != null) {
+    LaunchedEffect(hasPermissions, selectedDeviceId, selectedUsbKey, sourceProfile) {
+        if (hasPermissions && sourceProfile == InputSourceProfile.USB_DIRECT && (selectedDeviceId != null || selectedUsbKey != null)) {
             val requestDeviceId = selectedDeviceId
-            capture.requestDirectUsbPermission(requestDeviceId) { error ->
-                if (selectedDeviceId == requestDeviceId && sourceProfile == InputSourceProfile.USB_DIRECT) {
+            val requestUsbKey = selectedUsbKey
+            capture.requestDirectUsbPermission(requestDeviceId, requestUsbKey) { error ->
+                usbInterfaces = capture.usbAudioInterfaces()
+                if (selectedDeviceId == requestDeviceId && selectedUsbKey == requestUsbKey && sourceProfile == InputSourceProfile.USB_DIRECT) {
                     if (error == null) status = "Direct USB access granted."
                     else {
                         sourceProfile = InputSourceProfile.RAW
@@ -354,6 +376,7 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
             }
         }
     }
+
     LaunchedEffect(Unit) {
         // On a fresh install there is no backing track yet. Decode the bundled
         // demo once so a new user can play along immediately.
@@ -404,14 +427,28 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
         onDispose { activity.lifecycle.removeObserver(observer) }
     }
 
+    /** Drops a direct USB selection once its interface has left the bus. */
+    fun forgetDisconnectedUsbInterface() {
+        val usbKey = selectedUsbKey ?: return
+        if (usbInterfaces.any { it.key == usbKey }) return
+        selectedUsbKey = null
+        userSelectedInput = false
+        routeInfo = "Selected interface disconnected; choose an input in setup."
+        if (isRecording || isMonitoring) scope.launch(Dispatchers.IO) { capture.stop() }
+        isMonitoring = false
+    }
+
     DisposableEffect(capture) {
         val callback = object : AudioDeviceCallback() {
             override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) {
                 inputDevices = capture.availableInputDevices()
+                usbInterfaces = capture.usbAudioInterfaces()
                 if (selectedDeviceId == null) routeInfo = "USB input connected — check Recording setup"
             }
             override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) {
                 inputDevices = capture.availableInputDevices()
+                usbInterfaces = capture.usbAudioInterfaces()
+                forgetDisconnectedUsbInterface()
                 if (removedDevices.any { it.id == selectedDeviceId }) {
                     selectedDeviceId = null
                     userSelectedInput = false
@@ -427,6 +464,24 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
             capture.stop()
             backingPlayer.release()
         }
+    }
+
+    // USB attach and detach arrive here as well, because an interface the phone's audio stack cannot
+    // drive never appears in the audio device list the callback above watches.
+    DisposableEffect(activity) {
+        val usbReceiver = object : BroadcastReceiver() {
+            override fun onReceive(receiverContext: android.content.Context?, intent: Intent?) {
+                usbInterfaces = capture.usbAudioInterfaces()
+                inputDevices = capture.availableInputDevices()
+                forgetDisconnectedUsbInterface()
+            }
+        }
+        val filter = IntentFilter().apply {
+            addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
+            addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
+        }
+        ContextCompat.registerReceiver(activity, usbReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        onDispose { try { activity.unregisterReceiver(usbReceiver) } catch (_: Exception) { } }
     }
 
     DisposableEffect(mixPreview) {
@@ -584,8 +639,43 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
         if (isMonitoring) { isMonitoring = false; scope.launch(Dispatchers.IO) { capture.stop() } }
         selectedDeviceId = id
         selectedDeviceIdentity = inputDevices.firstOrNull { it.id == id }?.workspaceIdentity().orEmpty()
+        selectedUsbKey = null
         userSelectedInput = true
         if (id == null || inputDevices.none { it.id == id && it.isUsbAudioInput() }) {
+            sourceProfile = InputSourceProfile.RAW
+            sourceProfileManuallySelected = false
+        }
+        levels = InputLevels(0f, 0f)
+        routeInfo = ""
+        inputDiagnostics = ""
+    }
+
+    /**
+     * Selects a USB interface for direct capture.
+     *
+     * The selection is held by USB identity rather than by Android's device id, so it still works
+     * for an interface the phone never lists as an audio input. When Android does list one for the
+     * same interface it is selected too, and then backs up the direct path if that cannot run.
+     */
+    fun selectUsbInterface(key: String?) {
+        if (isMonitoring) { isMonitoring = false; scope.launch(Dispatchers.IO) { capture.stop() } }
+        selectedUsbKey = key
+        userSelectedInput = true
+        if (key != null) {
+            val usb = usbInterfaces.firstOrNull { it.key == key }
+            val wanted = usb?.name?.lowercase()?.filter { it.isLetterOrDigit() }
+            val androidInput = inputDevices.firstOrNull { device ->
+                device.isUsbAudioInput() && wanted != null &&
+                    device.productName?.toString()?.lowercase()?.filter { it.isLetterOrDigit() } == wanted
+            }
+            if (androidInput != null) {
+                selectedDeviceId = androidInput.id
+                selectedDeviceIdentity = androidInput.workspaceIdentity()
+            }
+            sourceProfile = InputSourceProfile.USB_DIRECT
+            sourceProfileManuallySelected = true
+            status = "Grant USB access if asked, then test the input."
+        } else if (sourceProfile == InputSourceProfile.USB_DIRECT) {
             sourceProfile = InputSourceProfile.RAW
             sourceProfileManuallySelected = false
         }
@@ -635,10 +725,26 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
             onOutput = { outputRoute = it },
             monitorInput = monitorInput,
             monitorPan = monitorPan,
-            sourceProfile = sourceProfile
+            sourceProfile = sourceProfile,
+            usbKey = selectedUsbKey
         )
         isMonitoring = started
         if (started) status = "Input test running — play each input to check its meter."
+    }
+
+    // A test that hears nothing on the Raw profile is re-opened once on Compatible, because some
+    // interfaces only ever hand back zeros for one of the two.
+    LaunchedEffect(capture) {
+        capture.onAutoProfileSwitch = { suggested ->
+            if (sourceProfile == InputSourceProfile.RAW) {
+                sourceProfile = suggested
+                status = "No signal in Raw mode — retrying on ${suggested.label}."
+                if (isMonitoring) {
+                    isMonitoring = false
+                    startInputTest()
+                }
+            }
+        }
     }
 
     suspend fun startCaptureAndCamera(video: File) {
@@ -670,7 +776,8 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
                 onOutput = { route -> activity.runOnUiThread { outputRoute = route } },
                 monitorInput = monitorInput,
                 monitorPan = monitorPan,
-                sourceProfile = sourceProfile
+                sourceProfile = sourceProfile,
+                usbKey = selectedUsbKey
             )
         }
         if (!captureStarted) {
@@ -1008,6 +1115,9 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
             onDeviceSelected = { id ->
                 selectInputDevice(id)
             },
+            usbInterfaces = usbInterfaces,
+            selectedUsbKey = selectedUsbKey,
+            onUsbInterfaceSelected = { key -> selectUsbInterface(key) },
             mode = mode,
             onModeSelected = { selected ->
                 if (isMonitoring) { isMonitoring = false; scope.launch(Dispatchers.IO) { capture.stop() } }
@@ -1062,6 +1172,9 @@ private fun AppRoot(activity: MainActivity, restored: Map<String, String>, darkT
             devices = inputDevices,
             selectedDeviceId = selectedDeviceId,
             onDeviceSelected = ::selectInputDevice,
+            usbInterfaces = usbInterfaces,
+            selectedUsbKey = selectedUsbKey,
+            onUsbInterfaceSelected = { key -> selectUsbInterface(key) },
             mode = mode,
             onModeSelected = { selected ->
                 if (isMonitoring) { isMonitoring = false; scope.launch(Dispatchers.IO) { capture.stop() } }

@@ -8,3 +8,13 @@ local.properties
 captures/
 .externalNativeBuild/
 .cxx/
+
+# Not part of the app build
+Website/
+Screenshots/
+StockImages/
+UsbAudioProbe/
+UsbAudioProbe.zip
+DefaultBackingTrack.wav
+store_feature_graphic_*.png
+store_icon_*.png

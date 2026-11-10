@@ -12,6 +12,9 @@ import androidx.compose.ui.unit.dp
 import com.onegoodtake.app.audio.InputChannelMode
 import com.onegoodtake.app.audio.InputLevels
 import com.onegoodtake.app.audio.InputSourceProfile
+import com.onegoodtake.app.audio.UsbAudioInterface
+import com.onegoodtake.app.audio.isUsbAudioInput
+import com.onegoodtake.app.audio.normalisedDeviceName
 import com.onegoodtake.app.camera.VideoQuality
 import com.onegoodtake.app.ui.components.AppButton
 import com.onegoodtake.app.BuildConfig
@@ -22,6 +25,9 @@ fun InputSetupDialog(
     devices: List<AudioDeviceInfo>,
     selectedDeviceId: Int?,
     onDeviceSelected: (Int?) -> Unit,
+    usbInterfaces: List<UsbAudioInterface> = emptyList(),
+    selectedUsbKey: String? = null,
+    onUsbInterfaceSelected: (String?) -> Unit = {},
     mode: InputChannelMode,
     onModeSelected: (InputChannelMode) -> Unit,
     sourceProfile: InputSourceProfile,
@@ -74,6 +80,39 @@ fun InputSetupDialog(
                         }
                     }
                 }
+                if (usbInterfaces.isNotEmpty()) {
+                    Spacer(Modifier.height(12.dp))
+                    SectionLabel("USB INTERFACES · DIRECT CAPTURE")
+                    Text(
+                        "Capture straight from the interface, for one the phone does not list as an input.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    usbInterfaces.forEach { usb ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(selectedUsbKey == usb.key, onClick = { onUsbInterfaceSelected(usb.key) })
+                            Column(Modifier.weight(1f)) {
+                                Text(usb.name)
+                                Text(
+                                    "%04X:%04X".format(usb.vendorId, usb.productId) +
+                                        if (androidListsInput(usb, devices)) " · Android also lists it" else " · Android lists no input",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (!usb.permissionGranted && selectedUsbKey == usb.key) {
+                                    Text(
+                                        "USB access is requested when you test the input",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    if (selectedUsbKey != null) {
+                        TextButton(onClick = { onUsbInterfaceSelected(null) }) { Text("Stop using direct USB") }
+                    }
+                }
                 Spacer(Modifier.height(12.dp))
                 SectionLabel("CHANNELS")
                 InputChannelMode.values().forEach { option ->
@@ -85,11 +124,8 @@ fun InputSetupDialog(
                 Spacer(Modifier.height(12.dp))
                 SectionLabel("CAPTURE PROFILE")
                 InputSourceProfile.values().filter { option ->
-                    option != InputSourceProfile.USB_DIRECT || devices.any {
-                        it.id == selectedDeviceId && it.type in intArrayOf(
-                            AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_ACCESSORY
-                        )
-                    }
+                    option != InputSourceProfile.USB_DIRECT || selectedUsbKey != null ||
+                        devices.any { it.id == selectedDeviceId && isUsbAudioInput(it) }
                 }.forEach { option ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         RadioButton(sourceProfile == option, onClick = { onSourceProfileSelected(option) })
@@ -208,6 +244,12 @@ fun InputSetupDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Done") } }
     )
+}
+
+/** True when the phone's own audio stack also exposes this interface as an input. */
+private fun androidListsInput(usb: UsbAudioInterface, devices: List<AudioDeviceInfo>): Boolean {
+    val wanted = normalisedDeviceName(usb.name)
+    return devices.any { isUsbAudioInput(it) && normalisedDeviceName(it.productName?.toString()) == wanted }
 }
 
 @Composable

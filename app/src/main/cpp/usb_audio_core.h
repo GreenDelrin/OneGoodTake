@@ -1,4 +1,5 @@
-// Minimal USB Audio Class 2.0 capture driver for Android using usbdevfs (no libusb).
+// Minimal USB Audio Class capture driver for Android using usbdevfs (no libusb).
+// Handles class-compliant UAC2 and UAC1 interfaces with 16/24/32-bit integer PCM.
 #pragma once
 #include <atomic>
 #include <cstdint>
@@ -14,6 +15,9 @@ namespace uac {
 struct AltInfo {
     int iface = 0, alt = 0, channels = 0, subslot = 0, bits = 0;
     int ep = 0, maxPacket = 0, interval = 1, usage = 0;
+    int uac = 0;                 // 1 when the alt setting is UAC1, 2 when it is UAC2
+    bool freqControl = false;    // UAC1 endpoint accepts SET_CUR sampling frequency
+    std::vector<int> rates;      // rates the alt setting declares (UAC1); empty for UAC2
 };
 
 struct ParsedDesc {
@@ -23,14 +27,18 @@ struct ParsedDesc {
 };
 
 bool parse(const uint8_t* d, size_t n, ParsedDesc& out, std::string& log);
-const AltInfo* chooseAlt(const ParsedDesc& pd);
+// Picks the capture alt setting to stream: prefers one that runs at preferredRate, then two
+// channels, then a streaming (non-zero bandwidth) setting. minChannels is the caller's floor.
+const AltInfo* chooseAlt(const ParsedDesc& pd, int preferredRate, int minChannels);
 int captureInterface(const uint8_t* d, size_t n);
 
 class Capture {
 public:
     ~Capture() { stop(); }
+    // sampleRate is a preference: the rate the device actually runs at is negotiated from its
+    // clock source and reported back through sampleRate(). minChannels steers the alt choice.
     // Returns "OK ..." on success, "ERROR ..." otherwise. Both include a descriptor report.
-    std::string start(int fd, const uint8_t* desc, size_t len, int sampleRate);
+    std::string start(int fd, const uint8_t* desc, size_t len, int sampleRate, int minChannels);
     void stop();
     int channels() const { return nch_; }
     int sampleRate() const { return rate_; }

@@ -25,6 +25,34 @@ import java.io.RandomAccessFile
 import java.util.Collections
 import androidx.core.content.ContextCompat
 
+/**
+ * A USB audio interface as it appears on the USB bus.
+ *
+ * These come from UsbManager rather than from AudioManager: an interface that Android's audio HAL
+ * cannot drive is still listed here, which is what lets the app capture from it directly.
+ */
+data class UsbAudioInterface(
+    val deviceId: Int,
+    val vendorId: Int,
+    val productId: Int,
+    val name: String,
+    val key: String,
+    val permissionGranted: Boolean
+)
+
+/** Stable identity for a USB interface: its USB identity and name, not Android's device id. */
+internal fun usbInterfaceKey(vendorId: Int, productId: Int, name: String): String =
+    "usb:%04x:%04x:%s".format(vendorId, productId, name)
+
+/** Product names differ between Android and USB in case, spacing and punctuation, so compare loosely. */
+internal fun normalisedDeviceName(name: String?): String =
+    name.orEmpty().lowercase().filter { it.isLetterOrDigit() }
+
+internal fun isUsbAudioInput(device: AudioDeviceInfo): Boolean =
+    device.type == AudioDeviceInfo.TYPE_USB_DEVICE ||
+        device.type == AudioDeviceInfo.TYPE_USB_HEADSET ||
+        device.type == AudioDeviceInfo.TYPE_USB_ACCESSORY
+
 class AudioCapture(private val context: Context) {
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
     private val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
@@ -36,6 +64,26 @@ class AudioCapture(private val context: Context) {
     @Volatile var onCaptureStarted: ((Long) -> Unit)? = null
     private val peaks = Collections.synchronizedList(mutableListOf<Float>())
     @Volatile private var warmedUp = false
+
+    /**
+     * Asked to re-open the input with another profile when a test hears digital silence.
+     *
+     * Some interfaces initialise happily on Raw and then hand back zeros, which is why the app
+     * offers a Compatible profile at all. Rather than leave the user staring at a dead meter, the
+     * capture asks for that profile once and reports the switch.
+     */
+    @Volatile var onAutoProfileSwitch: ((InputSourceProfile) -> Unit)? = null
+    private var escalatedProfile = false
+    private var reportedSilence = false
+
+    private companion object {
+        /** bInterfaceSubClass of an audio streaming interface. */
+        const val AUDIO_STREAMING_SUBCLASS = 2
+        /** Asked for first; an interface that cannot run at this rate reports its own back. */
+        const val PREFERRED_SAMPLE_RATE = 48000
+        /** This much digital silence in a test means the profile cannot hear the interface. */
+        const val SILENCE_ESCALATION_MS = 1200L
+    }
 
     fun warmUp() {
         if (warmedUp) return
@@ -54,9 +102,31 @@ class AudioCapture(private val context: Context) {
     fun unregisterDeviceCallback(callback: AudioDeviceCallback) =
         audioManager.unregisterAudioDeviceCallback(callback)
 
-    fun requestDirectUsbPermission(deviceId: Int?, onResult: (String?) -> Unit) {
-        val usbDevice = resolveUsbDevice(deviceId) ?: run {
-            onResult("Could not match the selected Android input to one USB audio device.")
+    /**
+     * USB interfaces that expose a capture stream, whether or not Android lists an input for them.
+     * The list drives the app's own picker so a device the phone's audio HAL ignores can still be
+     * captured from directly.
+     */
+    fun usbAudioInterfaces(): List<UsbAudioInterface> =
+        usbManager.deviceList.values
+            .filter { usbHasCaptureInterface(it) }
+            .map { device ->
+                val name = device.productName?.toString()?.takeIf { it.isNotBlank() }
+                    ?: "USB audio %04x:%04x".format(device.vendorId, device.productId)
+                UsbAudioInterface(
+                    deviceId = device.deviceId,
+                    vendorId = device.vendorId,
+                    productId = device.productId,
+                    name = name,
+                    key = usbInterfaceKey(device.vendorId, device.productId, name),
+                    permissionGranted = usbManager.hasPermission(device)
+                )
+            }
+            .sortedBy { it.name.lowercase() }
+
+    fun requestDirectUsbPermission(deviceId: Int?, usbKey: String? = null, onResult: (String?) -> Unit) {
+        val usbDevice = resolveUsbDevice(deviceId, usbKey) ?: run {
+            onResult("Could not match the selection to a USB audio interface. Pick the interface under USB interfaces, then test again.")
             return
         }
         if (usbManager.hasPermission(usbDevice)) {
@@ -92,8 +162,10 @@ class AudioCapture(private val context: Context) {
         onOutput: (String) -> Unit = {},
         monitorInput: Boolean = false,
         monitorPan: Float = 0f,
-        sourceProfile: InputSourceProfile = InputSourceProfile.RAW
-    ): Boolean = startCapture(null, deviceId, mode, onLevels, onRoute, onError, onDiagnostics, onOutput, monitorInput, monitorPan, sourceProfile)
+        sourceProfile: InputSourceProfile = InputSourceProfile.RAW,
+        usbKey: String? = null,
+        allowProfileEscalation: Boolean = false
+    ): Boolean = startCapture(null, deviceId, usbKey, mode, onLevels, onRoute, onError, onDiagnostics, onOutput, monitorInput, monitorPan, sourceProfile, allowProfileEscalation)
 
     fun startRecording(
         output: File, deviceId: Int?, mode: InputChannelMode,
@@ -104,11 +176,13 @@ class AudioCapture(private val context: Context) {
         onOutput: (String) -> Unit = {},
         monitorInput: Boolean = false,
         monitorPan: Float = 0f,
-        sourceProfile: InputSourceProfile = InputSourceProfile.RAW
-    ): Boolean = startCapture(output, deviceId, mode, onLevels, onRoute, onError, onDiagnostics, onOutput, monitorInput, monitorPan, sourceProfile)
+        sourceProfile: InputSourceProfile = InputSourceProfile.RAW,
+        usbKey: String? = null,
+        allowProfileEscalation: Boolean = false
+    ): Boolean = startCapture(output, deviceId, usbKey, mode, onLevels, onRoute, onError, onDiagnostics, onOutput, monitorInput, monitorPan, sourceProfile, allowProfileEscalation)
 
     private fun startCapture(
-        output: File?, deviceId: Int?, mode: InputChannelMode,
+        output: File?, deviceId: Int?, usbKey: String?, mode: InputChannelMode,
         onLevels: (InputLevels) -> Unit,
         onRoute: (String) -> Unit,
         onError: (String) -> Unit,
@@ -116,23 +190,31 @@ class AudioCapture(private val context: Context) {
         onOutput: (String) -> Unit,
         monitorInput: Boolean,
         monitorPan: Float,
-        sourceProfile: InputSourceProfile
+        sourceProfile: InputSourceProfile,
+        allowProfileEscalation: Boolean
     ): Boolean {
         stop()
         captureStartElapsedMs = 0L
+        escalatedProfile = false
+        reportedSilence = false
         synchronized(peaks) { peaks.clear() }
         // Some interfaces keep their output asleep until real samples arrive through the
         // device the app plays to, and the monitoring stays silent until something else
         // plays. Warm it before the capture starts so the user hears themselves at once.
         if (AudioWarmUp.outputIsUsb(context)) AudioWarmUp.warm(context)
         if (sourceProfile == InputSourceProfile.USB_DIRECT) {
-            var directError = "UAC2 direct capture could not start."
-            if (startUsbCapture(output, deviceId, mode, onLevels, onRoute, { directError = it }, onDiagnostics, onOutput, monitorInput, monitorPan)) return true
+            var directError = "Direct USB capture could not start."
+            if (startUsbCapture(output, deviceId, usbKey, mode, onLevels, onRoute, { directError = it }, onDiagnostics, onOutput, monitorInput, monitorPan)) return true
+            // The interface is present but its direct stream would not run, so use Android's stack.
+            // The profile stays on Raw here; a silent test escalates itself to Compatible below.
+            val noAndroidInput = if (deviceId == null)
+                " · Android lists no input for this interface, so the phone's own microphone is used"
+            else ""
             return startCapture(
-                output, deviceId, mode, onLevels, onRoute,
+                output, deviceId, usbKey, mode, onLevels, onRoute,
                 { onError("Direct USB failed ($directError); Android backup failed: $it") },
-                { onDiagnostics("Direct USB unavailable ($directError); Android AudioRecord backup: $it") },
-                onOutput, monitorInput, monitorPan, InputSourceProfile.RAW
+                { onDiagnostics("Direct USB unavailable ($directError); Android AudioRecord backup on ${InputSourceProfile.RAW.label}$noAndroidInput") },
+                onOutput, monitorInput, monitorPan, InputSourceProfile.RAW, allowProfileEscalation = true
             )
         }
         val device = deviceId?.let { id -> availableInputDevices().firstOrNull { it.id == id } }
@@ -246,6 +328,7 @@ class AudioCapture(private val context: Context) {
                 var routeReported = false
                 var routeWaitReads = 0
                 var totalFramesRead = 0L
+                var silentRunMs = 0L
                 var lastDiagnosticsAt = 0L
                 var outputReported = false
                 while (running) {
@@ -336,6 +419,22 @@ class AudioCapture(private val context: Context) {
                     }
                     val perChannelLevels = channelPeakValues.map { (it / 32768f).coerceIn(0f, 1f) }
                     post { onLevels(InputLevels(leftPeak / 32768f, rightPeak / 32768f, perChannelLevels)) }
+                    if (maxOf(leftPeak, rightPeak) == 0) silentRunMs += (alignedCount / inputChannels) * 1000L / sampleRate
+                    else silentRunMs = 0L
+                    if (allowProfileEscalation && deviceId != null && silentRunMs >= SILENCE_ESCALATION_MS) {
+                        if (output == null && !escalatedProfile && sourceProfile == InputSourceProfile.RAW) {
+                            // The direct path already failed for this interface, so a test that hears
+                            // nothing on Raw is re-opened once on Compatible and the user is told why.
+                            // A profile the user chose is never overridden.
+                            escalatedProfile = true
+                            post { onAutoProfileSwitch?.invoke(InputSourceProfile.COMPATIBLE) }
+                            break
+                        }
+                        if (output != null && !reportedSilence) {
+                            reportedSilence = true
+                            post { onError("No signal arrived on ${sourceProfile.label}. Set Capture profile to Compatible in Recording setup and test again.") }
+                        }
+                    }
                     val now = android.os.SystemClock.elapsedRealtime()
                     if (now - lastDiagnosticsAt >= 250) {
                         lastDiagnosticsAt = now
@@ -361,7 +460,7 @@ class AudioCapture(private val context: Context) {
     }
 
     private fun startUsbCapture(
-        output: File?, deviceId: Int?, mode: InputChannelMode,
+        output: File?, deviceId: Int?, usbKey: String?, mode: InputChannelMode,
         onLevels: (InputLevels) -> Unit,
         onRoute: (String) -> Unit,
         onError: (String) -> Unit,
@@ -370,8 +469,8 @@ class AudioCapture(private val context: Context) {
         monitorInput: Boolean,
         monitorPan: Float
     ): Boolean {
-        val usbDevice = resolveUsbDevice(deviceId) ?: run {
-            onError("Could not match the selected Android input to one USB audio device.")
+        val usbDevice = resolveUsbDevice(deviceId, usbKey) ?: run {
+            onError("Could not match the selection to a USB audio interface. Pick it under USB interfaces, then test again.")
             return false
         }
         if (!usbManager.hasPermission(usbDevice)) {
@@ -404,8 +503,11 @@ class AudioCapture(private val context: Context) {
         }
         val claimed = listOf(captureInterface)
 
+        // Ask for a floor of two channels only when the chosen mode needs them, so a mono-only
+        // interface is still captured rather than refused.
+        val minimumChannels = if (mode.channelSelection == PcmChannelMapper.STEREO || mode.channelSelection == PcmChannelMapper.RIGHT) 2 else 1
         val nativeStatus = try {
-            NativeUsb.start(connection.fileDescriptor, descriptors, 48000)
+            NativeUsb.start(connection.fileDescriptor, descriptors, PREFERRED_SAMPLE_RATE, minimumChannels)
         } catch (e: LinkageError) {
             releaseUsbConnection(connection, claimed)
             onError("Direct USB capture library is unavailable for this phone's CPU architecture.")
@@ -423,7 +525,6 @@ class AudioCapture(private val context: Context) {
         }
 
         val inputChannels = NativeUsb.channels()
-        val minimumChannels = if (mode.channelSelection == PcmChannelMapper.STEREO || mode.channelSelection == PcmChannelMapper.RIGHT) 2 else 1
         if (inputChannels < minimumChannels) {
             NativeUsb.stop()
             releaseUsbConnection(connection, claimed)
@@ -431,7 +532,9 @@ class AudioCapture(private val context: Context) {
             return false
         }
 
-        val sampleRate = 48000
+        // The interface decides the rate: one that only runs at 44.1 kHz reports it back, and both
+        // the recording and the monitor follow.
+        val sampleRate = NativeUsb.sampleRate().takeIf { it > 0 } ?: PREFERRED_SAMPLE_RATE
         val outputChannels = mode.outputChannels
         val monitorTrack = if (monitorInput) {
             val outputMask = AudioFormat.CHANNEL_OUT_STEREO
@@ -550,8 +653,8 @@ class AudioCapture(private val context: Context) {
                         lastDiagnosticsAt = now
                         val blockPeak = channelPeaks.maxOrNull() ?: 0f
                         val rms = kotlin.math.sqrt(sumSquares / sampleCount.coerceAtLeast(1))
-                        val detail = if (blockPeak == 0f) "Direct USB: digital silence · $inputChannels ch · ${mode.label}"
-                            else "Direct USB: peak ${(blockPeak * 100).toInt()}% · RMS ${(rms * 100).toInt()}% · $inputChannels ch · ${mode.label}"
+                        val detail = if (blockPeak == 0f) "Direct USB: digital silence · $inputChannels ch · ${mode.label} · attempt ${sampleRate / 1000} kHz, try Compatible or reconnect"
+                            else "Direct USB: peak ${(blockPeak * 100).toInt()}% · RMS ${(rms * 100).toInt()}% · $inputChannels ch · ${mode.label} · ${sampleRate / 1000} kHz"
                         post { onDiagnostics(detail) }
                     }
                     if (now - lastUsbStatsAt >= 1000) {
@@ -576,13 +679,30 @@ class AudioCapture(private val context: Context) {
         return true
     }
 
-    private fun resolveUsbDevice(deviceId: Int?): UsbDevice? {
-        val audioDevice = deviceId?.let { id -> availableInputDevices().firstOrNull { it.id == id } } ?: return null
-        val candidates = usbManager.deviceList.values.filter { device ->
-            (0 until device.interfaceCount).any { device.getInterface(it).interfaceClass == UsbConstants.USB_CLASS_AUDIO }
+    private fun usbHasCaptureInterface(device: UsbDevice): Boolean =
+        (0 until device.interfaceCount).any { index ->
+            val usbInterface = device.getInterface(index)
+            usbInterface.interfaceClass == UsbConstants.USB_CLASS_AUDIO &&
+                usbInterface.interfaceSubclass == AUDIO_STREAMING_SUBCLASS
         }
-        val selectedName = audioDevice.productName?.toString()
-        val named = candidates.filter { it.productName?.toString() == selectedName }
+
+    /**
+     * Finds the USB device behind the app's selection.
+     *
+     * An interface chosen straight from the USB bus is matched on its own identity, which is what
+     * lets the app capture from interfaces Android never lists as an input. Otherwise the Android
+     * input device is matched to a USB device by product name.
+     */
+    private fun resolveUsbDevice(deviceId: Int?, usbKey: String?): UsbDevice? {
+        val devices = usbManager.deviceList.values.toList()
+        if (!usbKey.isNullOrBlank()) {
+            val chosen = usbAudioInterfaces().firstOrNull { it.key == usbKey }
+            if (chosen != null) devices.firstOrNull { it.deviceId == chosen.deviceId }?.let { return it }
+        }
+        val audioDevice = deviceId?.let { id -> availableInputDevices().firstOrNull { it.id == id } } ?: return null
+        val candidates = devices.filter { usbHasCaptureInterface(it) }
+        val selectedName = normalisedDeviceName(audioDevice.productName?.toString())
+        val named = candidates.filter { normalisedDeviceName(it.productName?.toString()) == selectedName }
         return when {
             named.size == 1 -> named.first()
             named.isEmpty() && candidates.size == 1 -> candidates.first()

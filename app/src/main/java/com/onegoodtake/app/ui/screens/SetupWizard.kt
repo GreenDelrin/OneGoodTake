@@ -1,7 +1,10 @@
 package com.onegoodtake.app.ui.screens
 
+import android.content.Intent
 import android.media.AudioDeviceInfo
+import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,6 +30,9 @@ import androidx.compose.ui.window.DialogProperties
 import com.onegoodtake.app.audio.InputChannelMode
 import com.onegoodtake.app.audio.InputLevels
 import com.onegoodtake.app.audio.InputSourceProfile
+import com.onegoodtake.app.audio.UsbAudioInterface
+import com.onegoodtake.app.audio.isUsbAudioInput
+import com.onegoodtake.app.audio.normalisedDeviceName
 import com.onegoodtake.app.camera.CameraOption
 import com.onegoodtake.app.ui.Waveform
 import com.onegoodtake.app.ui.components.AppButton
@@ -47,6 +53,8 @@ object WizardStep {
     const val LAST = READY
 }
 
+private const val DONATION_URL = "https://giannichiarello.com/product/donation/"
+
 @Composable
 fun SetupWizard(
     step: Int,
@@ -55,6 +63,9 @@ fun SetupWizard(
     devices: List<AudioDeviceInfo>,
     selectedDeviceId: Int?,
     onDeviceSelected: (Int?) -> Unit,
+    usbInterfaces: List<UsbAudioInterface> = emptyList(),
+    selectedUsbKey: String? = null,
+    onUsbInterfaceSelected: (String?) -> Unit = {},
     mode: InputChannelMode,
     onModeSelected: (InputChannelMode) -> Unit,
     sourceProfile: InputSourceProfile,
@@ -96,11 +107,15 @@ fun SetupWizard(
                         WizardStep.CAMERA -> CameraStep(cameras, cameraIndex, onCameraSelected)
                         WizardStep.INPUT -> InputStep(
                             devices, selectedDeviceId, onDeviceSelected, mode, onModeSelected,
-                            sourceProfile, onSourceProfileSelected, isTesting, onToggleTest, levels, livePeaks, routeInfo
+                            sourceProfile, onSourceProfileSelected, isTesting, onToggleTest, levels, livePeaks, routeInfo,
+                            usbInterfaces, selectedUsbKey, onUsbInterfaceSelected
                         )
                         WizardStep.SOUND -> SoundStep(monitorInput, onMonitorInputChanged, outputRoute, soundHeard, onSoundHeard)
                         WizardStep.PLAYALONG -> PlayAlongStep(backingName, onLoadDemoTrack, onChooseBackingFromPhone, statusMessage)
-                        WizardStep.READY -> ReadyStep(hasPermissions, devices, selectedDeviceId, monitorInput, cameras, cameraIndex, backingName)
+                        WizardStep.READY -> ReadyStep(
+                            hasPermissions, devices, selectedDeviceId, monitorInput, cameras, cameraIndex, backingName,
+                            usbInterfaces.firstOrNull { it.key == selectedUsbKey }?.name
+                        )
                     }
                 }
                 Spacer(Modifier.height(14.dp))
@@ -208,13 +223,16 @@ private fun InputStep(
     onToggleTest: () -> Unit,
     levels: InputLevels,
     livePeaks: List<Float>,
-    routeInfo: String
+    routeInfo: String,
+    usbInterfaces: List<UsbAudioInterface> = emptyList(),
+    selectedUsbKey: String? = null,
+    onUsbInterfaceSelected: (String?) -> Unit = {}
 ) {
     WizardTitle("Pick your input", "If you plugged in an interface, choose it here so the app records from it.")
     Spacer(Modifier.height(12.dp))
     SectionLabel("INPUT")
     Row(verticalAlignment = Alignment.CenterVertically) {
-        RadioButton(selectedDeviceId == null, onClick = { onDeviceSelected(null) })
+        RadioButton(selectedUsbKey == null && selectedDeviceId == null, onClick = { onDeviceSelected(null) })
         Text("Phone microphone", modifier = Modifier.weight(1f))
     }
     devices.forEach { device ->
@@ -230,6 +248,35 @@ private fun InputStep(
             }
         }
     }
+    if (usbInterfaces.isNotEmpty()) {
+        Spacer(Modifier.height(10.dp))
+        SectionLabel("USB INTERFACES · DIRECT CAPTURE")
+        Text(
+            if (devices.isEmpty())
+                "The phone lists no audio input, but these interfaces are connected and can be captured directly."
+            else "Capture straight from the interface instead of Android's audio stack.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        usbInterfaces.forEach { usb ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(selectedUsbKey == usb.key, onClick = { onUsbInterfaceSelected(usb.key) })
+                Column(Modifier.weight(1f)) {
+                    Text(usb.name)
+                    Text(
+                        "%04X:%04X".format(usb.vendorId, usb.productId) +
+                            if (devices.any { isUsbAudioInput(it) && normalisedDeviceName(it.productName?.toString()) == normalisedDeviceName(usb.name) })
+                                " · Android also lists it" else " · Android lists no input",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+        if (selectedUsbKey != null) {
+            TextButton(onClick = { onUsbInterfaceSelected(null) }) { Text("Stop using direct USB") }
+        }
+    }
     Spacer(Modifier.height(10.dp))
     SectionLabel("CHANNELS")
     InputChannelMode.values().forEach { option ->
@@ -238,7 +285,7 @@ private fun InputStep(
             Text(option.label)
         }
     }
-    if (selectedDeviceId != null && devices.any { it.id == selectedDeviceId }) {
+    if (selectedUsbKey != null || (selectedDeviceId != null && devices.any { it.id == selectedDeviceId })) {
         Spacer(Modifier.height(10.dp))
         SectionLabel("HOW IT IS RECORDED")
         InputSourceProfile.values().forEach { option ->
@@ -394,15 +441,19 @@ private fun ReadyStep(
     monitorInput: Boolean,
     cameras: List<CameraOption>,
     cameraIndex: Int,
-    backingName: String?
+    backingName: String?,
+    usbName: String? = null
 ) {
+    val context = LocalContext.current
     WizardTitle("You are ready", "Everything is set. The record button is on the next screen.")
     Spacer(Modifier.height(16.dp))
     ReadyLine("Camera and microphone", if (hasPermissions) "Allowed" else "Not allowed")
     ReadyLine("Camera", cameras.getOrNull(cameraIndex)?.label ?: "Front")
     ReadyLine(
         "Input",
-        devices.firstOrNull { it.id == selectedDeviceId }?.productName?.toString() ?: "Phone microphone"
+        usbName
+            ?: devices.firstOrNull { it.id == selectedDeviceId }?.productName?.toString()
+            ?: "Phone microphone"
     )
     ReadyLine("Headphone monitoring", if (monitorInput) "On" else "Off")
     ReadyLine("Backing track", backingName ?: "None")
@@ -412,6 +463,10 @@ private fun ReadyStep(
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
+    Spacer(Modifier.height(12.dp))
+    TextButton(onClick = {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(DONATION_URL)))
+    }) { Text("Support the developer") }
 }
 
 @Composable

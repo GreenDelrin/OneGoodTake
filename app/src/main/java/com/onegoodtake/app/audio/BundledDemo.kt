@@ -7,7 +7,7 @@ import java.io.File
  * A bundled, licence-clean backing track so a new install has something to play along
  * with immediately, without the user having to pick a file first.
  *
- * The source ships as a compressed file (MP3) in res/raw so the Play Store download
+ * The source ships as a compressed file (MP3) in res/raw so the download
  * stays small; it is decoded to a 16-bit WAV in the app's private storage on first use,
  * the same format the live mix and the offline mixer read directly.
  */

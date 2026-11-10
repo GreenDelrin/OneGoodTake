@@ -11,12 +11,12 @@ static std::mutex g_cap_mutex;
 extern "C" {
 
 JNIEXPORT jstring JNICALL Java_com_onegoodtake_app_audio_NativeUsb_start(
-        JNIEnv* env, jobject, jint fd, jbyteArray desc, jint rate) {
+        JNIEnv* env, jobject, jint fd, jbyteArray desc, jint rate, jint minChannels) {
     std::lock_guard<std::mutex> lock(g_cap_mutex);
     g_cap = std::make_unique<uac::Capture>();
     jsize n = env->GetArrayLength(desc);
     jbyte* d = env->GetByteArrayElements(desc, nullptr);
-    std::string r = g_cap->start(fd, reinterpret_cast<const uint8_t*>(d), (size_t)n, rate);
+    std::string r = g_cap->start(fd, reinterpret_cast<const uint8_t*>(d), (size_t)n, rate, minChannels);
     env->ReleaseByteArrayElements(desc, d, JNI_ABORT);
     return env->NewStringUTF(r.c_str());
 }
@@ -38,6 +38,11 @@ JNIEXPORT void JNICALL Java_com_onegoodtake_app_audio_NativeUsb_stop(JNIEnv*, jo
 JNIEXPORT jint JNICALL Java_com_onegoodtake_app_audio_NativeUsb_channels(JNIEnv*, jobject) {
     std::lock_guard<std::mutex> lock(g_cap_mutex);
     return g_cap ? g_cap->channels() : 0;
+}
+
+JNIEXPORT jint JNICALL Java_com_onegoodtake_app_audio_NativeUsb_sampleRate(JNIEnv*, jobject) {
+    std::lock_guard<std::mutex> lock(g_cap_mutex);
+    return g_cap ? g_cap->sampleRate() : 0;
 }
 
 JNIEXPORT jint JNICALL Java_com_onegoodtake_app_audio_NativeUsb_read(

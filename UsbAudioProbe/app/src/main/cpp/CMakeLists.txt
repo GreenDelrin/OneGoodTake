@@ -1,6 +1,0 @@
-cmake_minimum_required(VERSION 3.22.1)
-project(usbaudio LANGUAGES CXX)
-set(CMAKE_CXX_STANDARD 17)
-add_library(usbaudio SHARED usb_audio_core.cpp jni_bridge.cpp)
-target_link_libraries(usbaudio log)
-target_link_options(usbaudio PRIVATE -Wl,-z,max-page-size=16384 -Wl,-z,separate-code)
