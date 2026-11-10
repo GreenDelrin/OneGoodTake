@@ -9,6 +9,8 @@ auto-master for social-media loudness (-14 LUFS). Kotlin + Jetpack Compose + Cam
 
 Repository: https://github.com/GreenDelrin/OneGoodTake
 
+Live site (screenshots, features, download): https://giannichiarello.com/OneGoodTake/
+
 ## Download
 
 Grab the latest APK from the [Releases](https://github.com/GreenDelrin/OneGoodTake/releases/latest) page, or download v1.9 directly:
