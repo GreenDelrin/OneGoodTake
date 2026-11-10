@@ -11,7 +11,9 @@ Repository: https://github.com/GreenDelrin/OneGoodTake
 
 ## Download
 
-Grab the latest APK from the [Releases](https://github.com/GreenDelrin/OneGoodTake/releases/latest) page.
+Grab the latest APK from the [Releases](https://github.com/GreenDelrin/OneGoodTake/releases/latest) page, or download v1.9 directly:
+[OneGoodTake_v1_9.apk](https://github.com/GreenDelrin/OneGoodTake/releases/download/v1.9/OneGoodTake_v1_9.apk)
+
 Install it (you may need to allow "install unknown apps" for your browser/file manager).
 
 ## Build
