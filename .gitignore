@@ -2,9 +2,12 @@
 .idea/
 **/build/
 local.properties
+keystore.properties
 *.iml
 *.apk
 *.aab
+*.keystore
+*.jks
 captures/
 .externalNativeBuild/
 .cxx/
