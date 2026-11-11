@@ -11,6 +11,8 @@ Repository: https://github.com/GreenDelrin/OneGoodTake
 
 Live site (screenshots, features, download): https://giannichiarello.com/OneGoodTake/
 
+![One Good Take - record screen](docs/phone_record_small.png)
+
 ## Download
 
 Grab the latest APK from the [Releases](https://github.com/GreenDelrin/OneGoodTake/releases/latest) page, or download v1.9 directly:
